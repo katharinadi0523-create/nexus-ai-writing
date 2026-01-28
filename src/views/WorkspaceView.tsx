@@ -1,14 +1,16 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Mode, WritingState, isValidTransition } from '../types/writing';
 import { getActiveScenarioData, ScenarioId, setActiveScenarioId } from '../constants/mockData';
 import { Editor } from '../components/Editor';
 import { CopilotSidebar } from '../components/CopilotSidebar';
-import { ArrowLeft, Clock, Save, Download, Edit2 } from 'lucide-react';
+import { ArrowLeft, Clock, Edit2 } from 'lucide-react';
+import { getTask, updateTask } from '../utils/taskStore';
 
 interface WorkspaceViewProps {
   initialInput: string;
   initialMode: Mode;
   initialScenarioId?: ScenarioId;
+  taskId?: string | null;
   onBack?: () => void;
   onSidebarToggle?: () => void;
   isSidebarCollapsed?: boolean;
@@ -18,6 +20,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   initialInput,
   initialMode,
   initialScenarioId,
+  taskId,
   onBack,
   onSidebarToggle,
   isSidebarCollapsed = false,
@@ -33,8 +36,77 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [documentName, setDocumentName] = useState<string>('新文档_1');
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
+  const [messages, setMessages] = useState<Array<{ role: 'user' | 'ai'; content: string | JSX.Element }>>([]);
+  const currentTaskIdRef = useRef<string | null>(taskId || null);
 
   const scenarioData = getActiveScenarioData();
+
+  // 从任务恢复状态
+  useEffect(() => {
+    if (taskId) {
+      const task = getTask(taskId);
+      if (task) {
+        currentTaskIdRef.current = taskId;
+        setMode(task.mode);
+        setWritingState(task.writingState);
+        setInput(task.input);
+        setContent(task.content);
+        setDocumentName(task.documentName);
+        setOutline(task.outline);
+        setMemoryConfig(task.memoryConfig || {});
+        setParamsConfig(task.paramsConfig || {});
+        setMessages(task.messages || []);
+        if (task.scenarioId) {
+          setActiveScenarioId(task.scenarioId);
+        }
+      }
+    } else {
+      currentTaskIdRef.current = null;
+    }
+  }, [taskId]);
+
+  // 保存任务状态（在返回时或状态变化时）
+  const saveCurrentTask = useCallback(() => {
+    if (currentTaskIdRef.current) {
+      // 使用最新的 messages，确保不会丢失
+      updateTask(currentTaskIdRef.current, {
+        mode,
+        writingState,
+        input,
+        content,
+        documentName,
+        outline,
+        memoryConfig,
+        paramsConfig,
+        messages: messages.length > 0 ? messages : [], // 确保 messages 是数组
+      });
+    }
+  }, [mode, writingState, input, content, documentName, outline, memoryConfig, paramsConfig, messages]);
+
+  // 在返回时保存任务
+  const handleBack = useCallback(() => {
+    saveCurrentTask();
+    if (onBack) {
+      onBack();
+    }
+  }, [saveCurrentTask, onBack]);
+
+  // 定期保存任务状态（每5秒）
+  useEffect(() => {
+    if (currentTaskIdRef.current) {
+      const interval = setInterval(() => {
+        saveCurrentTask();
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [saveCurrentTask]);
+
+  // 在关键状态变化时保存任务
+  useEffect(() => {
+    if (currentTaskIdRef.current) {
+      saveCurrentTask();
+    }
+  }, [writingState, content, documentName, messages, saveCurrentTask]);
 
   // 初始化时设置场景ID
   useEffect(() => {
@@ -60,29 +132,53 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   };
 
   // 流式生成内容
+  const generatingRef = useRef<boolean>(false);
+  const contentUpdateRef = useRef<string>('');
+  
   useEffect(() => {
-    if (isGenerating && scenarioData) {
+    // 如果是从任务恢复且已有内容且状态不是 GENERATING，不重新生成
+    if (taskId && content && writingState !== WritingState.GENERATING) {
+      generatingRef.current = false;
+      return;
+    }
+    
+    // 只在 GENERATING 状态且 isGenerating 为 true 时执行，且未在生成中
+    if (writingState === WritingState.GENERATING && isGenerating && scenarioData && !generatingRef.current) {
+      generatingRef.current = true;
+      contentUpdateRef.current = '';
       const fullText = scenarioData.generalData.fullText;
-      let currentIndex = 0;
+      let currentIndex = 0; // 总是从0开始，因为确认大纲后内容被重置
       let titleExtracted = false;
       
-      const interval = setInterval(() => {
+      // 使用 requestAnimationFrame 来优化更新频率，减少卡顿
+      let lastUpdateTime = 0;
+      const updateInterval = 100; // 每100ms更新一次，而不是每50ms
+      
+      const updateContent = (timestamp: number) => {
         if (currentIndex < fullText.length) {
-          const newContent = fullText.substring(0, currentIndex + 10);
-          setContent(newContent);
-          
-          // 提取第一个一级标题并更新文档标题
-          if (!titleExtracted) {
-            const extractedTitle = extractFirstH1Title(newContent);
-            if (extractedTitle) {
-              setDocumentName(extractedTitle);
-              titleExtracted = true;
+          // 控制更新频率
+          if (timestamp - lastUpdateTime >= updateInterval) {
+            const newContent = fullText.substring(0, currentIndex + 20); // 每次增加20个字符
+            contentUpdateRef.current = newContent;
+            setContent(newContent);
+            
+            // 提取第一个一级标题并更新文档标题
+            if (!titleExtracted) {
+              const extractedTitle = extractFirstH1Title(newContent);
+              if (extractedTitle) {
+                setDocumentName(extractedTitle);
+                titleExtracted = true;
+              }
             }
+            
+            currentIndex += 20;
+            lastUpdateTime = timestamp;
           }
           
-          currentIndex += 10;
+          requestAnimationFrame(updateContent);
         } else {
-          clearInterval(interval);
+          // 生成完成
+          generatingRef.current = false;
           setWritingState(WritingState.FINISHED);
           setIsGenerating(false);
           
@@ -94,17 +190,37 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           
           // 流式生成完成后，设置最终内容
           setContent(fullText);
+          contentUpdateRef.current = fullText;
         }
-      }, 50);
+      };
+      
+      requestAnimationFrame(updateContent);
 
-      return () => clearInterval(interval);
+      return () => {
+        generatingRef.current = false;
+      };
+    } else if (writingState !== WritingState.GENERATING) {
+      generatingRef.current = false;
     }
-  }, [isGenerating, scenarioData]);
+  }, [writingState, isGenerating, scenarioData, taskId]);
 
-  // 初始化：从 THINKING 状态开始（仅在首次加载且有输入时）
+  // 初始化：从 THINKING 状态开始（仅在首次加载且有输入时，且不是从任务恢复）
   const [hasInitialized, setHasInitialized] = useState<boolean>(false);
   
   useEffect(() => {
+    // 如果是从任务恢复，检查任务状态
+    if (taskId) {
+      const task = getTask(taskId);
+      if (task) {
+        // 如果任务已经有内容或状态不是 THINKING，说明是恢复的任务，跳过初始化
+        if (task.content || task.writingState !== WritingState.THINKING) {
+          setHasInitialized(true);
+          return;
+        }
+        // 如果是新创建的任务（状态是 THINKING 且没有内容），继续初始化流程
+      }
+    }
+    
     // 只在有初始输入且还未初始化时执行
     if (initialInput && !hasInitialized && writingState === WritingState.THINKING) {
       setHasInitialized(true);
@@ -112,10 +228,15 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       if (mode === Mode.GENERAL) {
         // 模拟思考过程，然后进入大纲确认
         setTimeout(() => {
-          if (scenarioData) {
+          if (scenarioData && scenarioData.generalData.outline) {
             setOutline(scenarioData.generalData.outline);
+            // 确保 outline 设置后再更新状态
+            setTimeout(() => {
+              setWritingState(WritingState.OUTLINE_CONFIRM);
+            }, 0);
+          } else {
+            setWritingState(WritingState.OUTLINE_CONFIRM);
           }
-          setWritingState(WritingState.OUTLINE_CONFIRM);
         }, 1500);
       } else {
         // 智能体模式
@@ -125,7 +246,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         setWritingState(WritingState.INPUT);
       }
     }
-  }, [initialInput, hasInitialized, mode, scenarioData, writingState]);
+  }, [initialInput, hasInitialized, mode, scenarioData, writingState, taskId]);
 
   // 检测输入中的 @ 字符，切换到智能体模式
   useEffect(() => {
@@ -155,10 +276,15 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       
       // 模拟思考过程，然后进入大纲确认
       setTimeout(() => {
-        if (scenarioData) {
+        if (scenarioData && scenarioData.generalData.outline) {
           setOutline(scenarioData.generalData.outline);
+          // 确保 outline 设置后再更新状态
+          setTimeout(() => {
+            setWritingState(WritingState.OUTLINE_CONFIRM);
+          }, 0);
+        } else {
+          setWritingState(WritingState.OUTLINE_CONFIRM);
         }
-        setWritingState(WritingState.OUTLINE_CONFIRM);
       }, 1500);
     }
   }, [input, mode, scenarioData]);
@@ -166,9 +292,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   // 处理大纲确认
   const handleOutlineConfirm = useCallback(() => {
     if (isValidTransition(mode, writingState, WritingState.GENERATING)) {
+      // 先重置内容，然后设置状态
+      // 注意：不要重置 messages，保持对话历史
+      setContent('');
       setWritingState(WritingState.GENERATING);
       setIsGenerating(true);
-      setContent(''); // 重置内容
       
       // 如果场景数据中有fullText，提前提取标题
       if (scenarioData?.generalData.fullText) {
@@ -176,6 +304,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         if (extractedTitle) {
           setDocumentName(extractedTitle);
         }
+      }
+      
+      // 确保消息被保存
+      if (currentTaskIdRef.current) {
+        saveCurrentTask();
       }
     }
   }, [mode, writingState, scenarioData]);
@@ -239,7 +372,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       <div className="h-14 bg-white border-b border-gray-200 flex items-center px-4">
         {/* 返回按钮 */}
         <button
-          onClick={onBack}
+          onClick={handleBack}
           className="p-2 hover:bg-gray-100 rounded transition-colors mr-4"
           title="返回首页"
         >
@@ -335,13 +468,21 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
             outline={outline}
             memoryConfig={memoryConfig}
             paramsConfig={paramsConfig}
+            messages={messages}
             onInputChange={setInput}
             onSend={handleSendQuery}
             onModeToggle={handleModeToggle}
             onOutlineConfirm={handleOutlineConfirm}
-            onMemoryConfigChange={handleMemoryConfigChange}
-            onParamsConfigChange={handleParamsConfigChange}
+            onMemoryConfigChange={(config) => {
+              setMemoryConfig(config);
+              handleMemoryConfigChange(config);
+            }}
+            onParamsConfigChange={(config) => {
+              setParamsConfig(config);
+              handleParamsConfigChange(config);
+            }}
             onStartGenerate={handleStartGenerate}
+            onMessagesChange={setMessages}
           />
         </div>
       </div>

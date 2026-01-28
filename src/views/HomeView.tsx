@@ -138,6 +138,37 @@ export const HomeView: React.FC<HomeViewProps> = ({
             }
           }}
         />
+        
+        {/* 推荐问题 */}
+        {selectedAgentId && (() => {
+          const selectedScenario = allScenarios.find(s => s.id === selectedAgentId);
+          if (selectedScenario) {
+            const suggestedQuestion = `写一篇${selectedScenario.name}`;
+            const handleSuggestedQuestionClick = () => {
+              setInput(suggestedQuestion);
+              // 使用 setTimeout 确保输入框更新后再发送
+              setTimeout(() => {
+                const mode = selectedAgentId ? Mode.AGENT : Mode.GENERAL;
+                if (selectedAgentId) {
+                  setActiveScenarioId(selectedAgentId);
+                }
+                onStartWriting(suggestedQuestion, mode, selectedAgentId || undefined);
+              }, 0);
+            };
+            return (
+              <div className="mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="text-sm text-gray-500 mb-2">推荐问题：</div>
+                <button
+                  onClick={handleSuggestedQuestionClick}
+                  className="px-4 py-2.5 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 hover:border-blue-300 transition-all shadow-sm hover:shadow-md w-full text-left"
+                >
+                  {suggestedQuestion}
+                </button>
+              </div>
+            );
+          }
+          return null;
+        })()}
       </div>
 
       {/* 智能体列表区域 */}

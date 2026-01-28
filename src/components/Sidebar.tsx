@@ -1,9 +1,11 @@
 import React from 'react';
 import { ScenarioId, mockDataStore, setActiveScenarioId, getActiveScenarioData } from '../constants/mockData';
 import { Brain, GitBranch, Sparkles, FileText } from 'lucide-react';
+import { getAllTasks, Task } from '../utils/taskStore';
 
 interface SidebarProps {
   onScenarioChange: (scenarioId: ScenarioId) => void;
+  onTaskRestore: (task: Task) => void;
 }
 
 const getCategoryIcon = (category: string) => {
@@ -19,14 +21,19 @@ const getCategoryIcon = (category: string) => {
   }
 };
 
-export const Sidebar: React.FC<SidebarProps> = ({ onScenarioChange }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ onScenarioChange, onTaskRestore }) => {
   const allScenarios = Object.values(mockDataStore);
   const favoriteTasks = allScenarios.filter((s) => s.isFavorite);
-  const recentTasks = allScenarios.slice(0, 4); // 最近4个任务
+  // 获取最近任务（从任务存储中获取）
+  const recentTasks = getAllTasks().slice(0, 10); // 最近10个任务
 
   const handleTaskClick = (scenarioId: ScenarioId) => {
     setActiveScenarioId(scenarioId);
     onScenarioChange(scenarioId);
+  };
+
+  const handleRecentTaskClick = (task: Task) => {
+    onTaskRestore(task);
   };
 
   const renderTaskItem = (scenario: typeof allScenarios[0]) => {
@@ -79,7 +86,34 @@ export const Sidebar: React.FC<SidebarProps> = ({ onScenarioChange }) => {
         <div className="p-4 border-t border-gray-200">
           <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">最近任务</h3>
           <div className="space-y-1">
-            {recentTasks.map(renderTaskItem)}
+            {recentTasks.length > 0 ? (
+              recentTasks.map((task) => (
+                <div
+                  key={task.id}
+                  onClick={() => handleRecentTaskClick(task)}
+                  className="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors hover:bg-gray-50"
+                >
+                  <div className="p-2 rounded bg-gray-100 text-gray-600">
+                    <FileText className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-800 truncate">
+                      {task.name}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {new Date(task.updatedAt).toLocaleString('zh-CN', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-xs text-gray-400 py-2">暂无最近任务</div>
+            )}
           </div>
         </div>
       </div>

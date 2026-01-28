@@ -64,6 +64,8 @@ export const Editor: React.FC<EditorProps> = ({ content, writingState, onContent
   });
 
   // 同步外部 content 到编辑器（仅在非用户编辑时）
+  const updateTimerRef = useRef<number | null>(null);
+  
   useEffect(() => {
     if (!editor) return;
 
@@ -81,30 +83,43 @@ export const Editor: React.FC<EditorProps> = ({ content, writingState, onContent
       return;
     }
 
+    // 清除之前的定时器
+    if (updateTimerRef.current) {
+      clearTimeout(updateTimerRef.current);
+    }
+
     if (isGenerating) {
-      // 流式输出模式：如果新内容更长，说明有新增内容
-      if (content.length > currentMarkdown.length && content.startsWith(currentMarkdown)) {
-        // 追加新内容部分
-        const newContent = content.slice(currentMarkdown.length);
-        if (newContent.trim()) {
-          // 将光标移到末尾，然后插入内容
-          const endPos = editor.state.doc.content.size;
-          editor.commands.setTextSelection(endPos);
-          // TipTap 的 Markdown 扩展会自动处理 Markdown 格式
-          editor.commands.insertContent(newContent);
+      // 流式输出模式：使用防抖，减少更新频率
+      updateTimerRef.current = window.setTimeout(() => {
+        // 流式输出模式：如果新内容更长，说明有新增内容
+        if (content.length > currentMarkdown.length && content.startsWith(currentMarkdown)) {
+          // 追加新内容部分
+          const newContent = content.slice(currentMarkdown.length);
+          if (newContent.trim()) {
+            // 将光标移到末尾，然后插入内容
+            const endPos = editor.state.doc.content.size;
+            editor.commands.setTextSelection(endPos);
+            // TipTap 的 Markdown 扩展会自动处理 Markdown 格式
+            editor.commands.insertContent(newContent);
+            lastSyncedContentRef.current = content;
+          }
+        } else if (content.length < currentMarkdown.length || !content.startsWith(currentMarkdown)) {
+          // 如果内容结构发生变化或被重置，重新设置完整内容
+          editor.commands.setContent(content);
           lastSyncedContentRef.current = content;
         }
-      } else {
-        // 如果内容结构发生变化，重新设置完整内容
-        editor.commands.setContent(content);
-        lastSyncedContentRef.current = content;
-      }
+      }, 100); // 防抖延迟100ms
     } else {
-      // 非流式输出模式：设置完整内容
-      // TipTap 的 setContent 可以接受 Markdown 字符串（通过 Markdown 扩展）
+      // 非流式输出模式：立即设置完整内容
       editor.commands.setContent(content);
       lastSyncedContentRef.current = content;
     }
+
+    return () => {
+      if (updateTimerRef.current) {
+        clearTimeout(updateTimerRef.current);
+      }
+    };
   }, [content, isGenerating, editor]);
 
   // 获取状态栏文本

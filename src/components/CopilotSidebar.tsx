@@ -16,6 +16,7 @@ interface CopilotSidebarProps {
   outline: string;
   memoryConfig: Record<string, any>;
   paramsConfig: Record<string, any>;
+  messages?: Array<{ role: 'user' | 'ai'; content: string | JSX.Element }>;
   onInputChange: (value: string) => void;
   onSend: () => void;
   onModeToggle: (mode: Mode) => void;
@@ -23,6 +24,7 @@ interface CopilotSidebarProps {
   onMemoryConfigChange: (config: Record<string, any>) => void;
   onParamsConfigChange: (config: Record<string, any>) => void;
   onStartGenerate: () => void;
+  onMessagesChange?: (messages: Array<{ role: 'user' | 'ai'; content: string | JSX.Element }>) => void;
   className?: string;
 }
 
@@ -35,6 +37,7 @@ export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
   outline,
   memoryConfig,
   paramsConfig,
+  messages: externalMessages,
   onInputChange,
   onSend,
   onModeToggle,
@@ -42,10 +45,11 @@ export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
   onMemoryConfigChange,
   onParamsConfigChange,
   onStartGenerate,
+  onMessagesChange,
   className,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('chat');
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'ai'; content: string | JSX.Element }>>([]);
+  const [internalMessages, setInternalMessages] = useState<Array<{ role: 'user' | 'ai'; content: string | JSX.Element }>>([]);
   const [isKnowledgeBaseOpen, setIsKnowledgeBaseOpen] = useState<boolean>(false);
   const [selectedKnowledgeBases, setSelectedKnowledgeBases] = useState<string[]>([]);
   const [isMemoryModalOpen, setIsMemoryModalOpen] = useState<boolean>(false);
@@ -56,13 +60,45 @@ export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
   const scenarioData = getActiveScenarioData();
   const currentScenarioId = scenarioData?.id;
 
+  // 使用外部传入的 messages 或内部 messages
+  const messages = externalMessages !== undefined ? externalMessages : internalMessages;
+
+  // 更新 messages 的统一方法
+  const updateMessages = useCallback((newMessages: Array<{ role: 'user' | 'ai'; content: string | JSX.Element }>) => {
+    if (externalMessages !== undefined && onMessagesChange) {
+      // 外部管理 messages，直接更新
+      onMessagesChange(newMessages);
+    } else {
+      // 内部管理 messages
+      setInternalMessages(newMessages);
+    }
+  }, [externalMessages, onMessagesChange]);
+
+  // 如果外部传入了 messages，同步到内部状态（用于初始化标记）
+  useEffect(() => {
+    if (externalMessages !== undefined) {
+      if (externalMessages.length > 0) {
+        setInitialized(true);
+      }
+      // 同步外部 messages 到内部，以防外部 messages 被清空时能恢复
+      if (externalMessages.length > 0) {
+        setInternalMessages(externalMessages);
+      }
+    }
+  }, [externalMessages]);
+
   // 初始化：如果有输入且还未初始化，添加用户消息
   useEffect(() => {
+    // 如果外部传入了 messages，不自动初始化
+    if (externalMessages !== undefined && externalMessages.length > 0) {
+      return;
+    }
+    
     if (input && !initialized && (writingState === WritingState.THINKING || writingState === WritingState.OUTLINE_CONFIRM)) {
-      setMessages([{ role: 'user', content: input }]);
+      updateMessages([{ role: 'user', content: input }]);
       setInitialized(true);
     }
-  }, [input, initialized, writingState]);
+  }, [input, initialized, writingState, externalMessages, updateMessages]);
 
   // 当发送消息时，添加到消息列表
   const handleSend = useCallback(() => {
@@ -70,19 +106,37 @@ export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
     
     // 添加用户消息
     const userMessage = input;
-    setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
+    updateMessages([...messages, { role: 'user', content: userMessage }]);
     
     // 调用父组件的发送处理
     onSend();
-  }, [input, onSend]);
+  }, [input, onSend, messages, updateMessages]);
 
   // 当状态变化时，添加 AI 回复
   useEffect(() => {
-    if (writingState === WritingState.OUTLINE_CONFIRM && messages.length > 0) {
-      const lastMessage = messages[messages.length - 1];
-      if (lastMessage.role === 'user' && !messages.some((m, i) => i === messages.length && m.role === 'ai')) {
-        setMessages((prev) => [
-          ...prev,
+    if (writingState === WritingState.OUTLINE_CONFIRM) {
+      // 检查是否已经有包含 OutlineConfirm 的 AI 消息
+      const hasOutlineMessage = messages.some((m) => {
+        if (m.role === 'ai' && typeof m.content !== 'string') {
+          // 检查是否是 React 元素且包含 OutlineConfirm
+          const content = m.content as any;
+          if (content && content.props && content.props.children) {
+            // 检查子元素中是否有 OutlineConfirm
+            const children = Array.isArray(content.props.children) 
+              ? content.props.children 
+              : [content.props.children];
+            return children.some((child: any) => 
+              child && child.type && (child.type.name === 'OutlineConfirm' || child.type.displayName === 'OutlineConfirm')
+            );
+          }
+        }
+        return false;
+      });
+      
+      // 如果还没有大纲确认消息，且 outline 有值，添加一个
+      if (!hasOutlineMessage && outline && outline.trim()) {
+        updateMessages([
+          ...messages,
           { 
             role: 'ai', 
             content: (
@@ -101,7 +155,7 @@ export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
         ]);
       }
     }
-  }, [writingState, messages, outline, onOutlineConfirm]);
+  }, [writingState, messages, outline, onOutlineConfirm, updateMessages]);
 
   // 当确认大纲后，添加进一步思考的消息和文档卡片
   useEffect(() => {
@@ -116,22 +170,23 @@ export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
       
       if (!hasThinkingMessage) {
         // 添加进一步思考的消息
-        setMessages((prev) => [
-          ...prev,
+        const newMessages = [
+          ...messages,
           { 
-            role: 'ai', 
+            role: 'ai' as const, 
             content: '深度思考完成'
           },
           { 
-            role: 'ai', 
+            role: 'ai' as const, 
             content: `根据你的需求，我为你生成了《${scenarioData?.name || '文档'}》`
           }
-        ]);
+        ];
+        updateMessages(newMessages);
         // 显示文档卡片
         setDocumentCardVisible(true);
       }
     }
-  }, [writingState, messages, scenarioData]);
+  }, [writingState, messages, scenarioData, updateMessages]);
 
   // 渲染对话内容
   const renderChatContent = () => {
