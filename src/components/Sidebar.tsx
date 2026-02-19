@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ScenarioId, mockDataStore, setActiveScenarioId, getActiveScenarioData } from '../constants/mockData';
-import { Brain, GitBranch, Sparkles, FileText } from 'lucide-react';
-import { getAllTasks, Task } from '../utils/taskStore';
+import { Brain, GitBranch, Sparkles, FileText, Pencil, Trash2 } from 'lucide-react';
+import { getAllTasks, Task, deleteTask, updateTask } from '../utils/taskStore';
 
 interface SidebarProps {
   onScenarioChange: (scenarioId: ScenarioId) => void;
@@ -25,15 +25,69 @@ export const Sidebar: React.FC<SidebarProps> = ({ onScenarioChange, onTaskRestor
   const allScenarios = Object.values(mockDataStore);
   const favoriteTasks = allScenarios.filter((s) => s.isFavorite);
   // 获取最近任务（从任务存储中获取）
-  const recentTasks = getAllTasks().slice(0, 10); // 最近10个任务
+  const [recentTasks, setRecentTasks] = useState<Task[]>(getAllTasks().slice(0, 10));
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<string>('');
+
+  const refreshTasks = () => {
+    setRecentTasks(getAllTasks().slice(0, 10));
+  };
 
   const handleTaskClick = (scenarioId: ScenarioId) => {
     setActiveScenarioId(scenarioId);
     onScenarioChange(scenarioId);
   };
 
-  const handleRecentTaskClick = (task: Task) => {
+  const handleRecentTaskClick = (task: Task, e?: React.MouseEvent) => {
+    // 如果点击的是操作按钮，不触发任务恢复
+    if (e && (e.target as HTMLElement).closest('.task-actions')) {
+      return;
+    }
     onTaskRestore(task);
+  };
+
+  const handleDeleteTask = (taskId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (window.confirm('确定要删除这个任务吗？')) {
+      deleteTask(taskId);
+      refreshTasks();
+      // 如果正在编辑这个任务，取消编辑状态
+      if (editingTaskId === taskId) {
+        setEditingTaskId(null);
+      }
+    }
+  };
+
+  const handleStartRename = (task: Task, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingTaskId(task.id);
+    setEditingName(task.name);
+  };
+
+  const handleCancelRename = () => {
+    setEditingTaskId(null);
+    setEditingName('');
+  };
+
+  const handleConfirmRename = (taskId: string) => {
+    if (editingName.trim()) {
+      updateTask(taskId, { name: editingName.trim() });
+      refreshTasks();
+    }
+    setEditingTaskId(null);
+    setEditingName('');
+  };
+
+  const handleRenameKeyDown = (e: React.KeyboardEvent, taskId: string) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      handleConfirmRename(taskId);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      handleCancelRename();
+    }
   };
 
   const renderTaskItem = (scenario: typeof allScenarios[0]) => {
@@ -90,25 +144,65 @@ export const Sidebar: React.FC<SidebarProps> = ({ onScenarioChange, onTaskRestor
               recentTasks.map((task) => (
                 <div
                   key={task.id}
-                  onClick={() => handleRecentTaskClick(task)}
-                  className="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors hover:bg-gray-50"
+                  onClick={(e) => handleRecentTaskClick(task, e)}
+                  className="group flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors hover:bg-gray-50 relative"
                 >
-                  <div className="p-2 rounded bg-gray-100 text-gray-600">
+                  <div className="p-2 rounded bg-gray-100 text-gray-600 flex-shrink-0">
                     <FileText className="w-4 h-4" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-gray-800 truncate">
-                      {task.name}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      {new Date(task.updatedAt).toLocaleString('zh-CN', {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </div>
+                    {editingTaskId === task.id ? (
+                      <input
+                        type="text"
+                        value={editingName}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        onKeyDown={(e) => handleRenameKeyDown(e, task.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={() => {
+                          // 失焦时自动确认（如果内容有变化）
+                          if (editingName.trim() && editingName.trim() !== task.name) {
+                            handleConfirmRename(task.id);
+                          } else {
+                            handleCancelRename();
+                          }
+                        }}
+                        className="w-full text-sm font-medium text-gray-800 bg-white border border-blue-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        autoFocus
+                      />
+                    ) : (
+                      <>
+                        <div className="text-sm font-medium text-gray-800 truncate">
+                          {task.name}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {new Date(task.updatedAt).toLocaleString('zh-CN', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </div>
+                      </>
+                    )}
                   </div>
+                  {editingTaskId !== task.id && (
+                    <div className="task-actions absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
+                      <button
+                        onClick={(e) => handleStartRename(task, e)}
+                        className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors bg-white shadow-sm"
+                        title="重命名"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => handleDeleteTask(task.id, e)}
+                        className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors bg-white shadow-sm"
+                        title="删除"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))
             ) : (

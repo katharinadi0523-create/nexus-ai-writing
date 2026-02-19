@@ -2,9 +2,11 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Mode, WritingState, isValidTransition } from '../types/writing';
 import { getActiveScenarioData, ScenarioId, setActiveScenarioId } from '../constants/mockData';
 import { Editor } from '../components/Editor';
+import type { RewriteType } from '../components/RewriteWindow';
 import { CopilotSidebar } from '../components/CopilotSidebar';
 import { ArrowLeft, Clock, Edit2 } from 'lucide-react';
 import { getTask, updateTask } from '../utils/taskStore';
+import { rewriteWithQwen } from '../services/qwenClient';
 
 interface WorkspaceViewProps {
   initialInput: string;
@@ -191,6 +193,18 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           // 流式生成完成后，设置最终内容
           setContent(fullText);
           contentUpdateRef.current = fullText;
+          
+          // 添加生成完成消息
+          setMessages(prev => {
+            // 检查是否已经有"全文生成完毕"消息
+            const hasCompletionMessage = prev.some(m => 
+              typeof m.content === 'string' && m.content.includes('全文生成完毕')
+            );
+            if (!hasCompletionMessage) {
+              return [...prev, { role: 'ai', content: '全文生成完毕' }];
+            }
+            return prev;
+          });
         }
       };
       
@@ -298,6 +312,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       setWritingState(WritingState.GENERATING);
       setIsGenerating(true);
       
+      // 添加用户确认消息
+      setMessages(prev => [...prev, { role: 'user', content: '确认大纲，开始生成' }]);
+      
       // 如果场景数据中有fullText，提前提取标题
       if (scenarioData?.generalData.fullText) {
         const extractedTitle = extractFirstH1Title(scenarioData.generalData.fullText);
@@ -311,7 +328,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         saveCurrentTask();
       }
     }
-  }, [mode, writingState, scenarioData]);
+  }, [mode, writingState, scenarioData, saveCurrentTask]);
 
   // 处理模式切换
   const handleModeToggle = useCallback((newMode: Mode) => {
@@ -342,6 +359,41 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     setIsGenerating(true);
     setContent(''); // 重置内容
     
+    // 记录配置信息到消息中
+    const configParts: string[] = [];
+    
+    // 如果有记忆配置，添加到消息中
+    if (Object.keys(memoryConfig).length > 0 && scenarioData?.agentConfig) {
+      const memoryText = scenarioData.agentConfig.memoryConfigs
+        .filter(config => memoryConfig[config.key])
+        .map(config => `${config.label}: ${memoryConfig[config.key]}`)
+        .join('\n');
+      if (memoryText) {
+        configParts.push(`记忆配置：\n${memoryText}`);
+      }
+    }
+    
+    // 如果有参数配置，添加到消息中
+    if (Object.keys(paramsConfig).length > 0 && scenarioData?.agentConfig) {
+      const paramsText = scenarioData.agentConfig.paramConfigs
+        .filter(config => paramsConfig[config.key])
+        .map(config => `${config.label}: ${paramsConfig[config.key]}`)
+        .join('\n');
+      if (paramsText) {
+        configParts.push(`参数配置：\n${paramsText}`);
+      }
+    }
+    
+    // 添加配置消息（如果有）和开始生成消息
+    if (configParts.length > 0) {
+      setMessages(prev => [...prev, { 
+        role: 'user', 
+        content: configParts.join('\n\n') + '\n\n开始生成'
+      }]);
+    } else {
+      setMessages(prev => [...prev, { role: 'user', content: '开始生成' }]);
+    }
+    
     // 如果场景数据中有fullText，提前提取标题
     if (scenarioData?.generalData.fullText) {
       const extractedTitle = extractFirstH1Title(scenarioData.generalData.fullText);
@@ -349,12 +401,45 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         setDocumentName(extractedTitle);
       }
     }
-  }, [scenarioData]);
+  }, [scenarioData, memoryConfig, paramsConfig]);
 
   const handleSave = () => {
     console.log('保存文档:', { documentName, content });
     // TODO: 实现保存逻辑
   };
+
+  const handleRewriteRequest = useCallback(
+    async (selectedText: string, type: RewriteType, customPrompt?: string): Promise<string> => {
+      const typeLabels: Record<RewriteType, string> = {
+        continue: '续写',
+        polish: '润色',
+        expand: '扩写',
+        custom: '自定义',
+      };
+      const prompt =
+        type === 'custom' && customPrompt
+          ? customPrompt
+          : typeLabels[type];
+      const message = `对选中内容「${selectedText.slice(0, 30)}${selectedText.length > 30 ? '...' : ''}」进行${prompt}`;
+      setMessages(prev => [...prev, { role: 'user', content: message }]);
+      setInput(message);
+
+      try {
+        const result = await rewriteWithQwen({
+          selectedText,
+          type,
+          customPrompt,
+        });
+        setMessages(prev => [...prev, { role: 'ai', content: `已完成${prompt}。` }]);
+        return result;
+      } catch (error) {
+        const messageText = error instanceof Error ? error.message : '改写失败，请稍后重试。';
+        setMessages(prev => [...prev, { role: 'ai', content: `改写失败：${messageText}` }]);
+        throw error;
+      }
+    },
+    []
+  );
 
   const handleDownload = () => {
     console.log('导出文档:', { documentName, content });
@@ -455,6 +540,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
               onContentChange={(newContent) => {
                 setContent(newContent);
               }}
+              onRewriteRequest={handleRewriteRequest}
             />
           </div>
         </div>

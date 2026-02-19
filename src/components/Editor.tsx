@@ -1,22 +1,49 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { WritingState } from '../types/writing';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import { Markdown } from 'tiptap-markdown';
+import { RewriteWindow, RewriteType } from './RewriteWindow';
 
 interface EditorProps {
   content: string;
   writingState: WritingState;
   onContentChange?: (content: string) => void;
+  /** 改写请求回调：选中的文本、改写类型、自定义要求（可选） */
+  onRewriteRequest?: (selectedText: string, type: RewriteType, customPrompt?: string) => Promise<string>;
 }
 
-export const Editor: React.FC<EditorProps> = ({ content, writingState, onContentChange }) => {
+export const Editor: React.FC<EditorProps> = ({ content, writingState, onContentChange, onRewriteRequest }) => {
+  interface RewriteSelectionState {
+    selectedText: string;
+    position: { top: number; left: number };
+    range: { from: number; to: number };
+  }
+
+  interface RewritePreviewState {
+    originalText: string;
+    rewrittenText: string;
+    position: { top: number; left: number };
+    range: { from: number; to: number };
+    status: 'loading' | 'done' | 'error';
+    errorMessage?: string;
+  }
+
   const [selectedHeading, setSelectedHeading] = useState<string>('H1');
   const [selectedFontSize, setSelectedFontSize] = useState<string>('16');
+  const [rewriteWindow, setRewriteWindow] = useState<RewriteSelectionState | null>(null);
+  const [rewritePreview, setRewritePreview] = useState<RewritePreviewState | null>(null);
+  const [isRewriting, setIsRewriting] = useState<boolean>(false);
   const lastSyncedContentRef = useRef<string>(content);
   const debounceTimerRef = useRef<number | null>(null);
   const isGeneratingRef = useRef<boolean>(false);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
+  const rewriteWindowContainerRef = useRef<HTMLDivElement>(null);
+  const rewritePreviewContainerRef = useRef<HTMLDivElement>(null);
+  const PREVIEW_MARGIN = 8;
+  const PREVIEW_WIDTH = 520;
+  const PREVIEW_ESTIMATED_HEIGHT = 420;
   
   const isGenerating = writingState === WritingState.GENERATING;
   isGeneratingRef.current = isGenerating;
@@ -203,6 +230,148 @@ export const Editor: React.FC<EditorProps> = ({ content, writingState, onContent
     document.execCommand('backColor', false, '#fef08a');
   }, [editor]);
 
+  // 划选后鼠标松开，展示改写窗口
+  const handleMouseUp = useCallback((event: MouseEvent) => {
+    if (!editor || !onRewriteRequest) return;
+    if (isRewriting) return;
+
+    const target = event.target as Node | null;
+    if (target && rewriteWindowContainerRef.current?.contains(target)) return;
+    if (target && rewritePreviewContainerRef.current?.contains(target)) return;
+
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    if (selection.isCollapsed) return;
+
+    // 检查选区是否在编辑器内
+    const container = editorContainerRef.current;
+    if (
+      container &&
+      selection.anchorNode &&
+      selection.focusNode &&
+      (!container.contains(selection.anchorNode) || !container.contains(selection.focusNode))
+    ) {
+      return;
+    }
+
+    const stateSelection = editor.state.selection;
+    if (stateSelection.empty) return;
+
+    const selectedText = editor.state.doc.textBetween(stateSelection.from, stateSelection.to, '\n').trim();
+    if (!selectedText) return;
+
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return; // 折叠选区
+
+    setRewriteWindow({
+      selectedText,
+      position: { top: rect.bottom, left: rect.left + rect.width / 2 },
+      range: { from: stateSelection.from, to: stateSelection.to },
+    });
+    setRewritePreview(null);
+  }, [editor, isRewriting, onRewriteRequest]);
+
+  useEffect(() => {
+    const container = editorContainerRef.current;
+    if (!container) return;
+    container.addEventListener('mouseup', handleMouseUp);
+    return () => container.removeEventListener('mouseup', handleMouseUp);
+  }, [handleMouseUp]);
+
+  const handleRewrite = useCallback(
+    async (type: RewriteType, customPrompt?: string) => {
+      if (!rewriteWindow || !onRewriteRequest) return;
+
+      const currentSelection = rewriteWindow;
+      setRewriteWindow(null);
+      setRewritePreview({
+        originalText: currentSelection.selectedText,
+        rewrittenText: '',
+        position: currentSelection.position,
+        range: currentSelection.range,
+        status: 'loading',
+      });
+
+      if (editor) {
+        editor
+          .chain()
+          .focus()
+          .setTextSelection({
+            from: currentSelection.range.from,
+            to: currentSelection.range.to,
+          })
+          .run();
+      }
+
+      try {
+        setIsRewriting(true);
+        const rewrittenText = await onRewriteRequest(currentSelection.selectedText, type, customPrompt);
+        const finalText = rewrittenText.trim();
+        if (!finalText) {
+          throw new Error('模型未返回有效改写内容。');
+        }
+        setRewritePreview(prev => prev ? {
+          ...prev,
+          rewrittenText: finalText,
+          status: 'done',
+        } : null);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '改写失败，请稍后重试。';
+        setRewritePreview(prev => prev ? {
+          ...prev,
+          status: 'error',
+          errorMessage: message,
+        } : null);
+      } finally {
+        setIsRewriting(false);
+      }
+    },
+    [rewriteWindow, onRewriteRequest, editor]
+  );
+
+  const handleCloseRewriteWindow = useCallback(() => {
+    setRewriteWindow(null);
+  }, []);
+
+  const handleApplyRewrite = useCallback(() => {
+    if (!editor || !rewritePreview || rewritePreview.status !== 'done') return;
+
+    editor
+      .chain()
+      .focus()
+      .insertContentAt(
+        { from: rewritePreview.range.from, to: rewritePreview.range.to },
+        rewritePreview.rewrittenText
+      )
+      .run();
+
+    setRewritePreview(null);
+  }, [editor, rewritePreview]);
+
+  const handleDiscardRewrite = useCallback(() => {
+    setRewritePreview(null);
+  }, []);
+
+  const rewritePreviewLayout = useMemo(() => {
+    if (!rewritePreview) return null;
+
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
+    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
+    const width = Math.min(PREVIEW_WIDTH, viewportWidth - PREVIEW_MARGIN * 2);
+
+    let left = rewritePreview.position.left - width / 2;
+    left = Math.max(PREVIEW_MARGIN, Math.min(left, viewportWidth - width - PREVIEW_MARGIN));
+
+    let top = rewritePreview.position.top + PREVIEW_MARGIN;
+    if (top + PREVIEW_ESTIMATED_HEIGHT > viewportHeight - PREVIEW_MARGIN) {
+      top = rewritePreview.position.top - PREVIEW_ESTIMATED_HEIGHT - PREVIEW_MARGIN;
+    }
+    top = Math.max(PREVIEW_MARGIN, Math.min(top, viewportHeight - PREVIEW_ESTIMATED_HEIGHT - PREVIEW_MARGIN));
+
+    return { width, left, top };
+  }, [rewritePreview]);
+
   // 清理防抖定时器
   useEffect(() => {
     return () => {
@@ -379,8 +548,63 @@ export const Editor: React.FC<EditorProps> = ({ content, writingState, onContent
       </div>
 
       {/* 编辑器内容区域 - 使用 TipTap EditorContent */}
-      <div className="flex-1 overflow-y-auto">
+      <div ref={editorContainerRef} className="flex-1 overflow-y-auto relative">
         <EditorContent editor={editor} />
+        {rewriteWindow && onRewriteRequest && (
+          <div ref={rewriteWindowContainerRef}>
+            <RewriteWindow
+              selectedText={rewriteWindow.selectedText}
+              position={rewriteWindow.position}
+              containerRect={editorContainerRef.current?.getBoundingClientRect()}
+              onRewrite={handleRewrite}
+              onClose={handleCloseRewriteWindow}
+              isLoading={isRewriting}
+            />
+          </div>
+        )}
+        {rewritePreview && rewritePreviewLayout && (
+          <div
+            ref={rewritePreviewContainerRef}
+            className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-xl flex flex-col"
+            style={{
+              width: `${rewritePreviewLayout.width}px`,
+              left: `${rewritePreviewLayout.left}px`,
+              top: `${rewritePreviewLayout.top}px`,
+              maxHeight: '68vh',
+            }}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            <div className="px-4 py-2 border-b border-gray-100 text-xs text-gray-500">
+              已选 {rewritePreview.originalText.length} 字
+            </div>
+            <div className="px-4 py-3 overflow-y-auto flex-1 min-h-0">
+              {rewritePreview.status === 'loading' && (
+                <div className="text-sm text-gray-600">改写中...</div>
+              )}
+              {rewritePreview.status === 'error' && (
+                <div className="text-sm text-red-600">{rewritePreview.errorMessage || '改写失败，请重试。'}</div>
+              )}
+              {rewritePreview.status === 'done' && (
+                <div className="text-sm text-gray-800 whitespace-pre-wrap">{rewritePreview.rewrittenText}</div>
+              )}
+            </div>
+            <div className="px-4 py-2 border-t border-gray-100 flex justify-end gap-2 bg-white sticky bottom-0">
+              <button
+                onClick={handleDiscardRewrite}
+                className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded"
+              >
+                放弃
+              </button>
+              <button
+                onClick={handleApplyRewrite}
+                disabled={rewritePreview.status !== 'done'}
+                className="px-3 py-1.5 text-sm bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed rounded"
+              >
+                替换原文
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 底部状态栏 */}

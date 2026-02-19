@@ -94,11 +94,17 @@ export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
       return;
     }
     
-    if (input && !initialized && (writingState === WritingState.THINKING || writingState === WritingState.OUTLINE_CONFIRM)) {
+    // 通用模式：THINKING 或 OUTLINE_CONFIRM 状态时添加第一条消息
+    // 智能体模式：INPUT 状态时添加第一条消息
+    if (input && !initialized && (
+      writingState === WritingState.THINKING || 
+      writingState === WritingState.OUTLINE_CONFIRM ||
+      (writingState === WritingState.INPUT && mode === Mode.AGENT)
+    )) {
       updateMessages([{ role: 'user', content: input }]);
       setInitialized(true);
     }
-  }, [input, initialized, writingState, externalMessages, updateMessages]);
+  }, [input, initialized, writingState, mode, externalMessages, updateMessages]);
 
   // 当发送消息时，添加到消息列表
   const handleSend = useCallback(() => {
