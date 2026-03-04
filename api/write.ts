@@ -1,3 +1,5 @@
+import { getKnowledgeBaseContext } from './knowledge-base-service.js';
+
 interface QwenChatResponse {
   choices?: Array<{
     message?: {
@@ -597,12 +599,29 @@ export default async function handler(req: any, res: any) {
   );
 
   try {
-    // 临时兜底：API handler 不跨模块加载知识库服务，避免 serverless 运行时模块解析失败。
-    // 后续可按需再将知识库检索恢复为独立服务调用。
-    const knowledgeBaseContext = {
+    let knowledgeBaseContext: {
+      mountedKnowledgeBases: Array<{ key: string; name: string }>;
+      contextText: string;
+    } = {
       mountedKnowledgeBases: knowledgeBaseIds.map((key) => ({ key, name: key })),
       contextText: '',
     };
+
+    if (knowledgeBaseIds.length > 0) {
+      try {
+        knowledgeBaseContext = await getKnowledgeBaseContext({
+          knowledgeBaseKeys: knowledgeBaseIds,
+          query: prompt,
+        });
+      } catch (knowledgeBaseError) {
+        const message =
+          knowledgeBaseError instanceof Error
+            ? knowledgeBaseError.message
+            : '知识库检索失败';
+        console.error('[write] knowledge base retrieval failed:', message);
+      }
+    }
+
     const messages = getMessages(
       action,
       prompt,
