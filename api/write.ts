@@ -31,6 +31,7 @@ interface WriteBody {
 
 const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const DEFAULT_MODEL = 'qwen-plus';
+const DEFAULT_QWEN_TIMEOUT_MS = 25000;
 
 function extractContent(data: QwenChatResponse): string {
   const content = data.choices?.[0]?.message?.content;
@@ -262,6 +263,33 @@ async function parseErrorResponse(response: Response): Promise<string> {
     return data.error?.message || `Qwen API 请求失败（${response.status}）`;
   } catch {
     return `Qwen API 请求失败（${response.status}）`;
+  }
+}
+
+function parseTimeoutMs(rawValue: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(rawValue || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -546,6 +574,10 @@ export default async function handler(req: any, res: any) {
 
   const baseUrl = process.env.QWEN_BASE_URL || DEFAULT_BASE_URL;
   const model = process.env.QWEN_MODEL || DEFAULT_MODEL;
+  const timeoutMs = parseTimeoutMs(
+    process.env.QWEN_REQUEST_TIMEOUT_MS,
+    DEFAULT_QWEN_TIMEOUT_MS
+  );
 
   try {
     const knowledgeBaseContext = await getKnowledgeBaseContext({
@@ -560,24 +592,37 @@ export default async function handler(req: any, res: any) {
       knowledgeBaseContext.contextText
     );
 
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        temperature: action === 'outline' ? 0.5 : action === 'thought' ? 0.6 : 0.7,
-        stream: shouldStream,
-        ...(action === 'article'
-          ? {
-              enable_thinking: true,
-            }
-          : {}),
-      }),
-    });
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(
+        `${baseUrl}/chat/completions`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: action === 'outline' ? 0.5 : action === 'thought' ? 0.6 : 0.7,
+            stream: shouldStream,
+            ...(action === 'article'
+              ? {
+                  enable_thinking: true,
+                }
+              : {}),
+          }),
+        },
+        timeoutMs
+      );
+    } catch (error) {
+      if (isAbortError(error)) {
+        res.status(504).json({ error: `上游模型服务超时（>${timeoutMs}ms）` });
+        return;
+      }
+      throw error;
+    }
 
     if (!response.ok) {
       const message = await parseErrorResponse(response);

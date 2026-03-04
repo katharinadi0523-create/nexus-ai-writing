@@ -20,6 +20,8 @@ interface RetrievedKnowledgeBaseChunks {
   topK: number;
 }
 
+const DEFAULT_APPFORGE_TIMEOUT_MS = 12000;
+
 export interface KnowledgeBaseContextResult {
   mountedKnowledgeBases: Array<{
     key: string;
@@ -45,6 +47,30 @@ export interface KnowledgeBaseContextResult {
 function parsePositiveInt(rawValue: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(rawValue || '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof DOMException && error.name === 'AbortError'
+  );
+}
+
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function resolvePositiveIntOverride(
@@ -82,6 +108,10 @@ function getKnowledgeBaseRuntimeConfig() {
     ),
     debug:
       process.env.KNOWLEDGE_BASE_DEBUG?.trim().toLowerCase() === 'true',
+    requestTimeoutMs: parsePositiveInt(
+      process.env.APPFORGE_REQUEST_TIMEOUT_MS,
+      DEFAULT_APPFORGE_TIMEOUT_MS
+    ),
   };
 }
 
@@ -205,32 +235,48 @@ async function requestAppforgeKnowledgeBaseChunks(
     throw new Error('服务端未配置 APPFORGE_COOKIE');
   }
 
-  const response = await fetch(runtimeConfig.appforgeDatasetApiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-auth-validate': runtimeConfig.appforgeAuthValidate,
-      'x-regionid': runtimeConfig.appforgeRegionId,
-      Cookie: runtimeConfig.appforgeCookie,
-    },
-    body: JSON.stringify({
-      projectID: knowledgeBase.projectId,
-      id: knowledgeBase.datasetId,
-      query,
-      retrievalModel: {
-        rerankingEnable: true,
-        rerankingModel: {
-          rerankingModelName: '',
-          rerankingProviderName: '',
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(
+      runtimeConfig.appforgeDatasetApiUrl,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-auth-validate': runtimeConfig.appforgeAuthValidate,
+          'x-regionid': runtimeConfig.appforgeRegionId,
+          Cookie: runtimeConfig.appforgeCookie,
         },
-        scoreThreshold: 0.1,
-        scoreThresholdEnabled: true,
-        searchMethod: 'HybridSearch',
-        topK,
-        weights: 0.6,
+        body: JSON.stringify({
+          projectID: knowledgeBase.projectId,
+          id: knowledgeBase.datasetId,
+          query,
+          retrievalModel: {
+            rerankingEnable: true,
+            rerankingModel: {
+              rerankingModelName: '',
+              rerankingProviderName: '',
+            },
+            scoreThreshold: 0.1,
+            scoreThresholdEnabled: true,
+            searchMethod: 'HybridSearch',
+            topK,
+            weights: 0.6,
+          },
+        }),
       },
-    }),
-  });
+      runtimeConfig.requestTimeoutMs
+    );
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error(
+        `${knowledgeBase.name} 检索超时（>${runtimeConfig.requestTimeoutMs}ms）`
+      );
+    }
+    throw error instanceof Error
+      ? error
+      : new Error(`${knowledgeBase.name} 检索调用失败`);
+  }
 
   if (!response.ok) {
     throw new Error(
@@ -457,15 +503,24 @@ export async function getKnowledgeBaseContext({
     .filter((result) => result.chunks.length > 0);
 
   if (successfulResults.length === 0) {
-    const firstFailure = settledResults.find(
-      (result): result is PromiseRejectedResult => result.status === 'rejected'
-    );
+    const result: KnowledgeBaseContextResult = {
+      mountedKnowledgeBases: mountedKnowledgeBaseRefs,
+      contextText: '',
+    };
 
-    if (firstFailure) {
-      throw firstFailure.reason instanceof Error
-        ? firstFailure.reason
-        : new Error('知识库检索失败');
+    if (runtimeConfig.debug) {
+      result.debug = buildDebugSummary(
+        query,
+        settledResults,
+        mountedKnowledgeBases,
+        topKDistribution,
+        '',
+        effectiveTotalTopK
+      );
+      logKnowledgeBaseDebug(result.debug);
     }
+
+    return result;
   }
 
   const contextText = formatKnowledgeBaseContext(successfulResults, {
