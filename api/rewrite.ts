@@ -40,6 +40,7 @@ interface RewriteBody {
 
 const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const DEFAULT_MODEL = 'qwen-plus';
+const DEFAULT_QWEN_TIMEOUT_MS = 32000;
 
 function isHeadingLine(text: string): boolean {
   const line = text.trim();
@@ -102,6 +103,33 @@ function getBody(rawBody: unknown): RewriteBody {
   return rawBody as RewriteBody;
 }
 
+function parsePositiveInt(rawValue: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(rawValue || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export default async function handler(req: any, res: any) {
   if (handleCors(req, res)) {
     return;
@@ -143,20 +171,37 @@ export default async function handler(req: any, res: any) {
 
   const baseUrl = process.env.QWEN_BASE_URL || DEFAULT_BASE_URL;
   const model = process.env.QWEN_MODEL || DEFAULT_MODEL;
+  const timeoutMs = parsePositiveInt(
+    process.env.REWRITE_REQUEST_TIMEOUT_MS,
+    DEFAULT_QWEN_TIMEOUT_MS
+  );
 
   try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        temperature: 0.7,
-      }),
-    });
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(
+        `${baseUrl}/chat/completions`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: 0.7,
+          }),
+        },
+        timeoutMs
+      );
+    } catch (error) {
+      if (isAbortError(error)) {
+        res.status(504).json({ error: `改写服务超时（>${timeoutMs}ms）` });
+        return;
+      }
+      throw error;
+    }
 
     const data = (await response.json()) as QwenChatResponse;
     if (!response.ok) {

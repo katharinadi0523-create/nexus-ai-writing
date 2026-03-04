@@ -43,6 +43,7 @@ interface CopilotBody {
   document?: string;
   outline?: string;
   title?: string;
+  lightweightChat?: boolean;
   knowledgeBaseIds?: string[];
   mode?: 'general' | 'agent';
   agentContext?: {
@@ -87,6 +88,10 @@ const DEFAULT_ROUTE_MODEL = 'qwen-turbo';
 const DEFAULT_ROUTE_REPLY = '我先判断一下你的意图。';
 const DEFAULT_RESTART_REPLY = '可以，我会按这个新主题重新开始生成。';
 const DEFAULT_AGENT_RELATED_REPLY = '我将使用当前智能体继续生成这个主题。';
+const DEFAULT_ROUTE_TIMEOUT_MS = 10000;
+const DEFAULT_EXECUTION_TIMEOUT_MS = 32000;
+const EDIT_INTENT_REGEX =
+  /(改写|修改|润色|扩写|扩充|精简|缩写|补充|补写|完善|优化|调整|重写|改成|改为|删除|增加|替换|续写|补全|改动)/;
 
 function getKnowledgeBaseBudgetByIntent(intent: CopilotIntent): {
   totalTopK: number;
@@ -126,6 +131,108 @@ function getBody(rawBody: unknown): CopilotBody {
     }
   }
   return rawBody as CopilotBody;
+}
+
+function parsePositiveInt(rawValue: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(rawValue || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function looksLikeEditIntent(message: string): boolean {
+  return EDIT_INTENT_REGEX.test(message);
+}
+
+function looksLikeQuestionIntent(message: string): boolean {
+  if (/[?？]/.test(message)) {
+    return true;
+  }
+
+  return /(什么|为何|为什么|如何|多少|几|哪|哪里|哪个|是否|有没有|能否|可否|请问)/.test(message);
+}
+
+function extractAgentWriteTopic(message: string): string {
+  return message
+    .replace(/^[，。！？\s]+/g, '')
+    .replace(/^(请|帮我|麻烦|请你|帮忙)?\s*/g, '')
+    .replace(/^(使用|用)?\s*(当前|这个)?\s*智能体\s*/g, '')
+    .replace(/^(继续)?\s*(写|生成|起草|输出)\s*/g, '')
+    .replace(/^(一篇|一份|一段)\s*/g, '')
+    .trim();
+}
+
+function buildFallbackRouteDecision({
+  message,
+  mode,
+  agentName,
+}: {
+  message: string;
+  mode: 'general' | 'agent';
+  agentName: string;
+}): RouteDecision {
+  const normalizedMessage = message.trim();
+
+  if (/重新|重来|另写|换个主题|换一篇|新写/.test(normalizedMessage)) {
+    const topic = normalizedMessage
+      .replace(/重新|重来|另写|换个主题|换一篇|新写/g, '')
+      .trim();
+    return {
+      intent: 'restart',
+      reply: DEFAULT_RESTART_REPLY,
+      topic: topic || normalizedMessage,
+    };
+  }
+
+  if (looksLikeEditIntent(normalizedMessage)) {
+    return {
+      intent: 'edit',
+      reply: '我正在定位对应段落并准备改写。',
+    };
+  }
+
+  if (looksLikeQuestionIntent(normalizedMessage)) {
+    return {
+      intent: 'qa',
+      reply: '我来结合当前文档回答你这个问题。',
+    };
+  }
+
+  if (mode === 'agent' && /(写|生成|起草|输出).*(文章|文案|内容|报告|说明)/.test(normalizedMessage)) {
+    return {
+      intent: 'agent_write_related',
+      reply: DEFAULT_AGENT_RELATED_REPLY,
+      topic: extractAgentWriteTopic(normalizedMessage) || normalizedMessage,
+    };
+  }
+
+  return {
+    intent: 'chat',
+    reply:
+      mode === 'agent'
+        ? `我在，继续说，我会基于智能体《${agentName || '当前智能体'}》来处理。`
+        : DEFAULT_ROUTE_REPLY,
+  };
 }
 
 function extractContent(data: QwenChatResponse): string {
@@ -920,32 +1027,31 @@ function buildLockedEditRewriteMessages({
   ];
 }
 
-function buildChatExecutionMessages({
+function buildLightweightChatMessages({
   message,
-  title,
-  structureSummary,
-  context,
-  knowledgeBaseContext,
+  mode,
+  agentName,
+  agentDescription,
 }: {
   message: string;
-  title: string;
-  structureSummary: string;
-  context: string;
-  knowledgeBaseContext: string;
+  mode: 'general' | 'agent';
+  agentName: string;
+  agentDescription: string;
 }) {
+  const rolePrompt =
+    mode === 'agent'
+      ? `你是写作工作台中的智能体《${agentName}》。结合你的能力描述（${agentDescription || '暂无描述'}）与用户闲聊，回复简洁自然。`
+      : '你是写作工作台中的中文助手。用户当前是在闲聊场景，回复简洁自然。';
+
   return [
     {
       role: 'system',
       content:
-        '你是中文写作工作台里的通用助手。你可以结合当前文档片段和外挂知识库片段回复用户。若用户只是确认、感谢或闲聊，回复保持简短自然；若涉及事实或写作建议，优先依据给定片段回答。不要编造，不要输出代码块。',
+        `${rolePrompt}不要引用当前文档，不要输出代码块，不要长篇展开。`,
     },
     {
       role: 'user',
-      content: `用户消息：\n${message}\n\n当前文档标题：\n${title || '（无标题）'}\n\n文档结构摘要：\n${
-        structureSummary || '（无）'
-      }\n\n相关文档片段：\n${context}\n\n${buildKnowledgeBasePromptBlock(
-        knowledgeBaseContext
-      )}\n\n请直接回复用户。`,
+      content: `用户消息：\n${message}\n\n请直接回复用户。`,
     },
   ];
 }
@@ -956,25 +1062,48 @@ async function requestModelOutput({
   model,
   messages,
   temperature,
+  timeoutMs,
+  stageName,
+  maxTokens,
 }: {
   baseUrl: string;
   apiKey: string;
   model: string;
   messages: Array<{ role: string; content: string }>;
   temperature: number;
+  timeoutMs: number;
+  stageName: string;
+  maxTokens?: number;
 }): Promise<string> {
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature,
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(
+      `${baseUrl}/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature,
+          ...(typeof maxTokens === 'number' && maxTokens > 0
+            ? {
+                max_tokens: Math.floor(maxTokens),
+              }
+            : {}),
+        }),
+      },
+      timeoutMs
+    );
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error(`${stageName}超时（>${timeoutMs}ms）`);
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     const errorMessage = await parseErrorResponse(response);
@@ -994,18 +1123,20 @@ async function requestRouteDecision({
   baseUrl,
   apiKey,
   routeModel,
-  fallbackModel,
   messages,
   mode,
   agentName,
+  message,
+  routeTimeoutMs,
 }: {
   baseUrl: string;
   apiKey: string;
   routeModel: string;
-  fallbackModel: string;
   messages: Array<{ role: string; content: string }>;
   mode: 'general' | 'agent';
   agentName: string;
+  message: string;
+  routeTimeoutMs: number;
 }): Promise<RouteDecision> {
   try {
     const output = await requestModelOutput({
@@ -1014,6 +1145,9 @@ async function requestRouteDecision({
       model: routeModel,
       messages,
       temperature: 0,
+      timeoutMs: routeTimeoutMs,
+      stageName: '意图识别',
+      maxTokens: 220,
     });
     const result = sanitizeRouteDecision(output, mode, agentName);
     if (!result) {
@@ -1021,22 +1155,13 @@ async function requestRouteDecision({
     }
     return result;
   } catch (error) {
-    if (routeModel === fallbackModel) {
-      throw error;
-    }
-
-    const output = await requestModelOutput({
-      baseUrl,
-      apiKey,
-      model: fallbackModel,
-      messages,
-      temperature: 0,
+    const reason = error instanceof Error ? error.message : '未知错误';
+    console.warn(`[copilot] route model failed, fallback to rule-based decision: ${reason}`);
+    return buildFallbackRouteDecision({
+      message,
+      mode,
+      agentName,
     });
-    const result = sanitizeRouteDecision(output, mode, agentName);
-    if (!result) {
-      throw new Error('轻量路由返回格式异常');
-    }
-    return result;
   }
 }
 
@@ -1079,6 +1204,7 @@ export default async function handler(req: any, res: any) {
   const mode = body.mode === 'agent' ? 'agent' : 'general';
   const agentName = body.agentContext?.agentName?.trim() || '当前智能体';
   const agentDescription = body.agentContext?.agentDescription?.trim() || '';
+  const lightweightChat = body.lightweightChat === true;
   const history = buildHistoryText(body.history);
 
   if (!message) {
@@ -1086,50 +1212,172 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  if (!document) {
-    res.status(400).json({ error: 'document 不能为空' });
-    return;
-  }
-
   const baseUrl = process.env.QWEN_BASE_URL || DEFAULT_BASE_URL;
   const executionModel = process.env.QWEN_MODEL || DEFAULT_EXECUTION_MODEL;
   const routeModel =
     process.env.COPILOT_ROUTE_MODEL || process.env.QWEN_ROUTE_MODEL || DEFAULT_ROUTE_MODEL;
-  const structureSummary = buildStructureSummary(outline, document);
-  const routeMessages =
-    mode === 'agent'
-      ? buildAgentRouteMessages({
-          message,
-          title,
-          structureSummary,
-          history,
-          agentName,
-          agentDescription,
-        })
-      : buildGeneralRouteMessages({
-          message,
-          title,
-          structureSummary,
-          history,
-        });
+  const routeTimeoutMs = parsePositiveInt(
+    process.env.COPILOT_ROUTE_TIMEOUT_MS,
+    DEFAULT_ROUTE_TIMEOUT_MS
+  );
+  const executionTimeoutMs = parsePositiveInt(
+    process.env.COPILOT_EXECUTION_TIMEOUT_MS,
+    DEFAULT_EXECUTION_TIMEOUT_MS
+  );
 
   try {
+    if (lightweightChat) {
+      const chatOutput = await requestModelOutput({
+        baseUrl,
+        apiKey,
+        model: executionModel,
+        messages: buildLightweightChatMessages({
+          message,
+          mode,
+          agentName,
+          agentDescription,
+        }),
+        temperature: 0.7,
+        timeoutMs: executionTimeoutMs,
+        stageName: '对话回复',
+        maxTokens: 600,
+      });
+
+      res.status(200).json({
+        intent: 'chat',
+        reply: sanitizePlainReply(chatOutput) || '我在，继续聊。',
+      });
+      return;
+    }
+
+    const structureSummary = buildStructureSummary(outline, document);
+
+    if (document && looksLikeEditIntent(message)) {
+      const directKnowledgeBaseContext =
+        mode === 'general'
+          ? {
+              mountedKnowledgeBases: knowledgeBaseIds.map((key) => ({ key, name: key })),
+              contextText: '',
+            }
+          : {
+              mountedKnowledgeBases: [],
+              contextText: '',
+            };
+
+      const lockedSection = findExplicitSectionMatch(document, message);
+      if (lockedSection) {
+        const rewrittenOutput = await requestModelOutput({
+          baseUrl,
+          apiKey,
+          model: executionModel,
+          messages: buildLockedEditRewriteMessages({
+            message,
+            title,
+            section: lockedSection,
+            knowledgeBaseContext: directKnowledgeBaseContext.contextText,
+          }),
+          temperature: 0.4,
+          timeoutMs: executionTimeoutMs,
+          stageName: '改写执行',
+          maxTokens: 1800,
+        });
+
+        const replacementText = sanitizeRewriteSection(rewrittenOutput);
+        if (!replacementText) {
+          res.status(502).json({ error: '编辑执行阶段未返回有效改写结果' });
+          return;
+        }
+
+        res.status(200).json({
+          intent: 'edit',
+          reply: '我已定位到对应段落，请确认是否接受这次修改。',
+          edit: {
+            status: 'ready',
+            sectionTitle: lockedSection.title,
+            targetText: lockedSection.text,
+            replacementText,
+          },
+        });
+        return;
+      }
+
+      const directRelevantContext = selectRelevantContext(
+        document,
+        `${message}\n${title}\n${outline}`,
+        3,
+        3600,
+        1400
+      );
+      const directEditOutput = await requestModelOutput({
+        baseUrl,
+        apiKey,
+        model: executionModel,
+        messages: buildEditExecutionMessages({
+          message,
+          title,
+          structureSummary,
+          context: directRelevantContext,
+          knowledgeBaseContext: directKnowledgeBaseContext.contextText,
+        }),
+        temperature: 0.2,
+        timeoutMs: executionTimeoutMs,
+        stageName: '改写执行',
+        maxTokens: 1600,
+      });
+
+      const directEditResult = sanitizeCopilotResponse(directEditOutput);
+      if (!directEditResult || directEditResult.intent !== 'edit') {
+        res.status(502).json({ error: '编辑执行阶段返回格式异常' });
+        return;
+      }
+
+      res.status(200).json(validateEditResponseAgainstDocument(directEditResult, document));
+      return;
+    }
+
+    const routeMessages =
+      mode === 'agent'
+        ? buildAgentRouteMessages({
+            message,
+            title,
+            structureSummary,
+            history,
+            agentName,
+            agentDescription,
+          })
+        : buildGeneralRouteMessages({
+            message,
+            title,
+            structureSummary,
+            history,
+          });
+
     const routeDecision = await requestRouteDecision({
       baseUrl,
       apiKey,
       routeModel,
-      fallbackModel: executionModel,
       messages: routeMessages,
       mode,
       agentName,
+      message,
+      routeTimeoutMs,
     });
 
     if (
       routeDecision.intent === 'restart' ||
       routeDecision.intent === 'agent_write_related' ||
-      routeDecision.intent === 'agent_write_unrelated'
+      routeDecision.intent === 'agent_write_unrelated' ||
+      routeDecision.intent === 'chat'
     ) {
       res.status(200).json(routeDecision);
+      return;
+    }
+
+    if (!document) {
+      res.status(200).json({
+        intent: 'chat',
+        reply: '当前没有可用文档内容。请先生成或粘贴正文，我再帮你改写或问答。',
+      });
       return;
     }
 
@@ -1148,40 +1396,6 @@ export default async function handler(req: any, res: any) {
             contextText: '',
           };
 
-    if (routeDecision.intent === 'chat') {
-      if (mode !== 'general' || knowledgeBaseIds.length === 0) {
-        res.status(200).json(routeDecision);
-        return;
-      }
-
-      const chatContext = selectRelevantContext(
-        document,
-        `${message}\n${title}\n${outline}`,
-        3,
-        3200,
-        1200
-      );
-      const chatOutput = await requestModelOutput({
-        baseUrl,
-        apiKey,
-        model: executionModel,
-        messages: buildChatExecutionMessages({
-          message,
-          title,
-          structureSummary,
-          context: chatContext,
-          knowledgeBaseContext: knowledgeBaseContext.contextText,
-        }),
-        temperature: 0.4,
-      });
-
-      res.status(200).json({
-        intent: 'chat',
-        reply: sanitizePlainReply(chatOutput) || routeDecision.reply,
-      });
-      return;
-    }
-
     if (routeDecision.intent === 'edit') {
       const lockedSection = findExplicitSectionMatch(document, message);
 
@@ -1197,6 +1411,9 @@ export default async function handler(req: any, res: any) {
             knowledgeBaseContext: knowledgeBaseContext.contextText,
           }),
           temperature: 0.4,
+          timeoutMs: executionTimeoutMs,
+          stageName: '改写执行',
+          maxTokens: 1800,
         });
 
         const replacementText = sanitizeRewriteSection(rewrittenOutput);
@@ -1240,6 +1457,9 @@ export default async function handler(req: any, res: any) {
           knowledgeBaseContext: knowledgeBaseContext.contextText,
         }),
         temperature: 0.3,
+        timeoutMs: executionTimeoutMs,
+        stageName: '问答执行',
+        maxTokens: 1200,
       });
 
       const reply = sanitizePlainReply(qaOutput);
@@ -1267,6 +1487,9 @@ export default async function handler(req: any, res: any) {
         knowledgeBaseContext: knowledgeBaseContext.contextText,
       }),
       temperature: 0.2,
+      timeoutMs: executionTimeoutMs,
+      stageName: '改写执行',
+      maxTokens: 1600,
     });
 
     const editResult = sanitizeCopilotResponse(editOutput);
