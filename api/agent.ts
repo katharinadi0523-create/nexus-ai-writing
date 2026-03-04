@@ -6,16 +6,25 @@ interface AgentBody {
 }
 
 type CorsHandler = (req: any, res: any) => boolean;
-let corsHandlerPromise: Promise<CorsHandler> | null = null;
+function setCorsHeaders(res: any) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
+}
 
-async function loadCorsHandler(): Promise<CorsHandler> {
-  if (!corsHandlerPromise) {
-    corsHandlerPromise = import(new URL('./cors.js', import.meta.url).href)
-      .then((module) => module.handleCors as CorsHandler);
+const handleCors: CorsHandler = (req, res) => {
+  setCorsHeaders(res);
+
+  if (req.method === 'OPTIONS') {
+    res.statusCode = 204;
+    res.end();
+    return true;
   }
 
-  return corsHandlerPromise;
-}
+  return false;
+};
 
 interface AppforgeEventEnvelope {
   event?: string;
@@ -28,6 +37,17 @@ interface AgentDefinition {
   appId: string;
   token: string;
   agentType: AgentType;
+}
+
+interface QwenChatResponse {
+  choices?: Array<{
+    message?: {
+      content?: string | Array<{ text?: string; type?: string }>;
+    };
+  }>;
+  error?: {
+    message?: string;
+  };
 }
 
 const APPFORGE_BASE_URL =
@@ -61,6 +81,9 @@ const FINAL_OUTPUT_KEYS = [
   'text',
 ];
 
+const DEFAULT_QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+const DEFAULT_QWEN_MODEL = 'qwen-plus';
+
 function getBody(rawBody: unknown): AgentBody {
   if (!rawBody) return {};
   if (typeof rawBody === 'string') {
@@ -90,6 +113,128 @@ function getInputs(value: unknown): Record<string, unknown> | undefined {
   }
 
   return Object.fromEntries(entries);
+}
+
+function extractQwenContent(data: QwenChatResponse): string {
+  const content = data.choices?.[0]?.message?.content;
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+  if (Array.isArray(content)) {
+    return content.map((item) => item.text || '').join('').trim();
+  }
+  return '';
+}
+
+function getScenarioLabel(scenarioId: string): string {
+  if (scenarioId === 'oil-gas') {
+    return '油气价格分析';
+  }
+  if (scenarioId === 'report-compile') {
+    return '报告整编';
+  }
+  return '指定智能体';
+}
+
+async function generateFallbackAgentResult({
+  scenarioId,
+  query,
+  inputs,
+}: {
+  scenarioId: string;
+  query: string;
+  inputs?: Record<string, unknown>;
+}): Promise<string> {
+  const apiKey = process.env.QWEN_API_KEY?.trim();
+  if (!apiKey) {
+    return '';
+  }
+
+  const baseUrl = process.env.QWEN_BASE_URL || DEFAULT_QWEN_BASE_URL;
+  const model = process.env.QWEN_MODEL || DEFAULT_QWEN_MODEL;
+  const inputSummary = inputs
+    ? Object.entries(inputs)
+        .map(([key, value]) => `${key}: ${String(value)}`)
+        .join('\n')
+    : '';
+
+  const messages = [
+    {
+      role: 'system',
+      content:
+        '你是企业写作智能体。请根据用户需求直接输出中文 Markdown 正文，不要输出解释、前后缀或代码块。',
+    },
+    {
+      role: 'user',
+      content: `当前模式：${getScenarioLabel(scenarioId)}\n用户需求：${query}${
+        inputSummary ? `\n附加参数：\n${inputSummary}` : ''
+      }\n\n请直接输出最终正文。`,
+    },
+  ];
+
+  try {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.6,
+      }),
+    });
+
+    if (!response.ok) {
+      return '';
+    }
+
+    const data = (await response.json()) as QwenChatResponse;
+    return extractQwenContent(data);
+  } catch {
+    return '';
+  }
+}
+
+async function sendAgentFallback({
+  res,
+  scenarioId,
+  query,
+  inputs,
+  reason,
+}: {
+  res: any;
+  scenarioId: string;
+  query: string;
+  inputs?: Record<string, unknown>;
+  reason: string;
+}) {
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') {
+    res.flushHeaders();
+  }
+
+  const fallbackResult = await generateFallbackAgentResult({
+    scenarioId,
+    query,
+    inputs,
+  });
+
+  if (fallbackResult.trim()) {
+    writeSseEvent(res, 'status', {
+      status: '真实智能体暂不可用，已自动切换为通用生成',
+    });
+    writeSseEvent(res, 'done', { result: fallbackResult });
+  } else {
+    writeSseEvent(res, 'error', { error: reason });
+  }
+
+  res.end();
 }
 
 function parseSseFrame(frame: string): string | null {
@@ -335,14 +480,6 @@ async function streamWorkflowAgentResponse({
 }
 
 export default async function handler(req: any, res: any) {
-  let handleCors: CorsHandler;
-  try {
-    handleCors = await loadCorsHandler();
-  } catch {
-    res.status(500).json({ error: '服务初始化失败（CORS 模块加载失败）' });
-    return;
-  }
-
   if (handleCors(req, res)) {
     return;
   }
@@ -402,20 +539,25 @@ export default async function handler(req: any, res: any) {
     if (!response.ok) {
       const rawText = await response.text();
       const errorMessage = parseErrorMessage(rawText, response.status);
-
-      res.statusCode = response.status;
-      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-      writeSseEvent(res, 'error', { error: errorMessage });
-      res.end();
+      await sendAgentFallback({
+        res,
+        scenarioId,
+        query,
+        inputs,
+        reason: errorMessage,
+      });
       return;
     }
 
     await streamWorkflowAgentResponse({ res, response });
   } catch (error) {
     const message = error instanceof Error ? error.message : '真实智能体调用失败';
-    res.statusCode = 500;
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    writeSseEvent(res, 'error', { error: message });
-    res.end();
+    await sendAgentFallback({
+      res,
+      scenarioId,
+      query,
+      inputs,
+      reason: message,
+    });
   }
 }

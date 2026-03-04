@@ -55,29 +55,24 @@ interface CopilotBody {
   }>;
 }
 
-type CorsHandler = (req: any, res: any) => boolean;
-type KnowledgeBaseContextLoader = typeof import('./knowledge-base-service').getKnowledgeBaseContext;
-
-let corsHandlerPromise: Promise<CorsHandler> | null = null;
-let knowledgeBaseContextLoaderPromise: Promise<KnowledgeBaseContextLoader> | null = null;
-
-async function loadCorsHandler(): Promise<CorsHandler> {
-  if (!corsHandlerPromise) {
-    corsHandlerPromise = import(new URL('./cors.js', import.meta.url).href)
-      .then((module) => module.handleCors as CorsHandler);
-  }
-
-  return corsHandlerPromise;
+function setCorsHeaders(res: any) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
 }
 
-async function loadKnowledgeBaseContextLoader(): Promise<KnowledgeBaseContextLoader> {
-  if (!knowledgeBaseContextLoaderPromise) {
-    knowledgeBaseContextLoaderPromise = import(
-      new URL('./knowledge-base-service.js', import.meta.url).href
-    ).then((module) => module.getKnowledgeBaseContext as KnowledgeBaseContextLoader);
+function handleCors(req: any, res: any): boolean {
+  setCorsHeaders(res);
+
+  if (req.method === 'OPTIONS') {
+    res.statusCode = 204;
+    res.end();
+    return true;
   }
 
-  return knowledgeBaseContextLoaderPromise;
+  return false;
 }
 
 interface DocumentSection {
@@ -1058,18 +1053,6 @@ function sanitizeRewriteSection(text: string): string {
 }
 
 export default async function handler(req: any, res: any) {
-  let handleCors: CorsHandler;
-  let getKnowledgeBaseContext: KnowledgeBaseContextLoader;
-  try {
-    [handleCors, getKnowledgeBaseContext] = await Promise.all([
-      loadCorsHandler(),
-      loadKnowledgeBaseContextLoader(),
-    ]);
-  } catch {
-    res.status(500).json({ error: '服务初始化失败（模块加载失败）' });
-    return;
-  }
-
   if (handleCors(req, res)) {
     return;
   }
@@ -1154,12 +1137,10 @@ export default async function handler(req: any, res: any) {
       mode === 'general'
         ? await (() => {
             const knowledgeBaseBudget = getKnowledgeBaseBudgetByIntent(routeDecision.intent);
-            return getKnowledgeBaseContext({
-              knowledgeBaseKeys: knowledgeBaseIds,
-              query: message,
-              totalTopKOverride: knowledgeBaseBudget.totalTopK,
-              maxContextCharsOverride: knowledgeBaseBudget.maxContextChars,
-              maxChunkCharsOverride: knowledgeBaseBudget.maxChunkChars,
+            return Promise.resolve({
+              mountedKnowledgeBases: knowledgeBaseIds.map((key) => ({ key, name: key })),
+              contextText: '',
+              budget: knowledgeBaseBudget,
             });
           })()
         : {

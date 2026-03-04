@@ -12,16 +12,25 @@ interface QwenChatResponse {
 }
 
 type CorsHandler = (req: any, res: any) => boolean;
-let corsHandlerPromise: Promise<CorsHandler> | null = null;
+function setCorsHeaders(res: any) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
+}
 
-async function loadCorsHandler(): Promise<CorsHandler> {
-  if (!corsHandlerPromise) {
-    corsHandlerPromise = import(new URL('./cors.js', import.meta.url).href)
-      .then((module) => module.handleCors as CorsHandler);
+const handleCors: CorsHandler = (req, res) => {
+  setCorsHeaders(res);
+
+  if (req.method === 'OPTIONS') {
+    res.statusCode = 204;
+    res.end();
+    return true;
   }
 
-  return corsHandlerPromise;
-}
+  return false;
+};
 
 interface RewriteBody {
   selectedText?: string;
@@ -94,14 +103,6 @@ function getBody(rawBody: unknown): RewriteBody {
 }
 
 export default async function handler(req: any, res: any) {
-  let handleCors: CorsHandler;
-  try {
-    handleCors = await loadCorsHandler();
-  } catch {
-    res.status(500).json({ error: '服务初始化失败（CORS 模块加载失败）' });
-    return;
-  }
-
   if (handleCors(req, res)) {
     return;
   }
