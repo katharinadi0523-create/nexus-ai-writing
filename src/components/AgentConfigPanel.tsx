@@ -1,6 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { AgentConfig } from '../constants/mockData';
 
+const areConfigsEqual = (
+  left: Record<string, any>,
+  right: Record<string, any>
+): boolean => {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+
+  if (leftKeys.length !== rightKeys.length) {
+    return false;
+  }
+
+  return leftKeys.every((key) => left[key] === right[key]);
+};
+
 interface AgentConfigPanelProps {
   agentConfig?: AgentConfig;
   memoryConfig: Record<string, any>;
@@ -8,6 +22,9 @@ interface AgentConfigPanelProps {
   onMemoryConfigChange: (config: Record<string, any>) => void;
   onParamsConfigChange: (config: Record<string, any>) => void;
   onStartGenerate: () => void;
+  readOnly?: boolean;
+  className?: string;
+  actionLabel?: string;
 }
 
 export const AgentConfigPanel: React.FC<AgentConfigPanelProps> = ({
@@ -17,6 +34,9 @@ export const AgentConfigPanel: React.FC<AgentConfigPanelProps> = ({
   onMemoryConfigChange,
   onParamsConfigChange,
   onStartGenerate,
+  readOnly = false,
+  className,
+  actionLabel,
 }) => {
   const [localMemoryConfig, setLocalMemoryConfig] = useState<Record<string, any>>(memoryConfig);
   const [localParamsConfig, setLocalParamsConfig] = useState<Record<string, any>>(paramsConfig);
@@ -24,34 +44,47 @@ export const AgentConfigPanel: React.FC<AgentConfigPanelProps> = ({
   // 初始化默认值
   useEffect(() => {
     if (agentConfig) {
-      const initialMemory: Record<string, any> = {};
-      const initialParams: Record<string, any> = {};
+      const defaultMemory: Record<string, any> = {};
+      const defaultParams: Record<string, any> = {};
 
       agentConfig.memoryConfigs.forEach((config) => {
         if (config.defaultValue) {
-          initialMemory[config.key] = config.defaultValue;
+          defaultMemory[config.key] = config.defaultValue;
         }
       });
 
       agentConfig.paramConfigs.forEach((config) => {
         if (config.defaultValue) {
-          initialParams[config.key] = config.defaultValue;
+          defaultParams[config.key] = config.defaultValue;
         }
       });
 
-      setLocalMemoryConfig(initialMemory);
-      setLocalParamsConfig(initialParams);
+      const nextMemory = { ...defaultMemory, ...memoryConfig };
+      const nextParams = { ...defaultParams, ...paramsConfig };
+
+      setLocalMemoryConfig((current) =>
+        areConfigsEqual(current, nextMemory) ? current : nextMemory
+      );
+      setLocalParamsConfig((current) =>
+        areConfigsEqual(current, nextParams) ? current : nextParams
+      );
     }
-  }, [agentConfig]);
+  }, [agentConfig, memoryConfig, paramsConfig]);
 
   // 同步到父组件
   useEffect(() => {
+    if (readOnly) {
+      return;
+    }
     onMemoryConfigChange(localMemoryConfig);
-  }, [localMemoryConfig, onMemoryConfigChange]);
+  }, [localMemoryConfig, onMemoryConfigChange, readOnly]);
 
   useEffect(() => {
+    if (readOnly) {
+      return;
+    }
     onParamsConfigChange(localParamsConfig);
-  }, [localParamsConfig, onParamsConfigChange]);
+  }, [localParamsConfig, onParamsConfigChange, readOnly]);
 
   if (!agentConfig) {
     return (
@@ -62,15 +95,28 @@ export const AgentConfigPanel: React.FC<AgentConfigPanelProps> = ({
   }
 
   const handleMemoryChange = (key: string, value: string) => {
+    if (readOnly) {
+      return;
+    }
     setLocalMemoryConfig((prev) => ({ ...prev, [key]: value }));
   };
 
   const handleParamChange = (key: string, value: string) => {
+    if (readOnly) {
+      return;
+    }
     setLocalParamsConfig((prev) => ({ ...prev, [key]: value }));
   };
 
+  const fieldClassName = `w-full px-3 py-2 border rounded-md focus:outline-none ${
+    readOnly
+      ? 'border-gray-200 bg-gray-50 text-gray-500 cursor-not-allowed'
+      : 'border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+  }`;
+  const resolvedActionLabel = actionLabel || (readOnly ? '配置已确认' : '开始生成');
+
   return (
-    <div className="p-6 bg-white border border-gray-200 rounded-lg m-4">
+    <div className={`p-6 bg-white border border-gray-200 rounded-lg ${className ?? 'm-4'}`}>
       {/* 智能体信息 */}
       <div className="mb-6">
         <h3 className="text-lg font-semibold text-gray-800 mb-1">{agentConfig.name}</h3>
@@ -95,7 +141,8 @@ export const AgentConfigPanel: React.FC<AgentConfigPanelProps> = ({
                   value={localMemoryConfig[config.key] || ''}
                   onChange={(e) => handleMemoryChange(config.key, e.target.value)}
                   placeholder={config.placeholder || ''}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  disabled={readOnly}
+                  className={fieldClassName}
                 />
               </div>
             ))}
@@ -120,7 +167,8 @@ export const AgentConfigPanel: React.FC<AgentConfigPanelProps> = ({
                   <select
                     value={localParamsConfig[config.key] || ''}
                     onChange={(e) => handleParamChange(config.key, e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={readOnly}
+                    className={fieldClassName}
                   >
                     <option value="">请选择</option>
                     {config.options.map((option) => (
@@ -135,7 +183,8 @@ export const AgentConfigPanel: React.FC<AgentConfigPanelProps> = ({
                     value={localParamsConfig[config.key] || ''}
                     onChange={(e) => handleParamChange(config.key, e.target.value)}
                     placeholder={config.defaultValue || ''}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={readOnly}
+                    className={fieldClassName}
                   />
                 )}
               </div>
@@ -148,9 +197,14 @@ export const AgentConfigPanel: React.FC<AgentConfigPanelProps> = ({
       <div className="flex items-center justify-end">
         <button
           onClick={onStartGenerate}
-          className="px-6 py-2 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors"
+          disabled={readOnly}
+          className={`px-6 py-2 text-sm rounded-md transition-colors ${
+            readOnly
+              ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
+              : 'text-white bg-blue-500 hover:bg-blue-600'
+          }`}
         >
-          开始生成
+          {resolvedActionLabel}
         </button>
       </div>
     </div>

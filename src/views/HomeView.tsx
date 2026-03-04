@@ -5,26 +5,55 @@ import { InputArea } from '../components/InputArea';
 import { KnowledgeBaseSelector } from '../components/KnowledgeBaseSelector';
 import { MemoryModal } from '../components/MemoryModal';
 import { ParamsModal } from '../components/ParamsModal';
-import { Brain, GitBranch, Sparkles } from 'lucide-react';
+import { Brain, GitBranch, Sparkles, Star } from 'lucide-react';
+
+const FAVORITE_AGENTS_STORAGE_KEY = 'favoriteAgentIds';
 
 interface HomeViewProps {
   onStartWriting: (input: string, mode: Mode, scenarioId?: ScenarioId) => void;
   selectedScenarioId?: ScenarioId;
   onScenarioSelect?: (scenarioId: ScenarioId | null) => void;
+  mountedKnowledgeBaseIds: string[];
+  onMountedKnowledgeBaseChange: (ids: string[]) => void;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
   onStartWriting,
   selectedScenarioId,
   onScenarioSelect,
+  mountedKnowledgeBaseIds,
+  onMountedKnowledgeBaseChange,
 }) => {
   const [input, setInput] = useState<string>('');
   const [stepGenerationEnabled, setStepGenerationEnabled] = useState<boolean>(true); // 默认开启
   const [selectedAgentId, setSelectedAgentId] = useState<ScenarioId | null>(selectedScenarioId || null);
   const [isKnowledgeBaseOpen, setIsKnowledgeBaseOpen] = useState<boolean>(false);
-  const [selectedKnowledgeBases, setSelectedKnowledgeBases] = useState<string[]>([]);
   const [isMemoryModalOpen, setIsMemoryModalOpen] = useState<boolean>(false);
   const [isParamsModalOpen, setIsParamsModalOpen] = useState<boolean>(false);
+  const [activeAgentTab, setActiveAgentTab] = useState<'organization' | 'favorite'>('organization');
+  const [favoriteAgentIds, setFavoriteAgentIds] = useState<ScenarioId[]>(() => {
+    if (typeof window === 'undefined') {
+      return Object.values(mockDataStore)
+        .filter((scenario) => scenario.isFavorite)
+        .map((scenario) => scenario.id);
+    }
+
+    try {
+      const saved = window.localStorage.getItem(FAVORITE_AGENTS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed as ScenarioId[];
+        }
+      }
+    } catch (error) {
+      console.error('读取收藏智能体失败:', error);
+    }
+
+    return Object.values(mockDataStore)
+      .filter((scenario) => scenario.isFavorite)
+      .map((scenario) => scenario.id);
+  });
 
   const allScenarios = Object.values(mockDataStore);
 
@@ -35,6 +64,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
       setActiveScenarioId(selectedScenarioId);
     }
   }, [selectedScenarioId]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(FAVORITE_AGENTS_STORAGE_KEY, JSON.stringify(favoriteAgentIds));
+    } catch (error) {
+      console.error('保存收藏智能体失败:', error);
+    }
+  }, [favoriteAgentIds]);
 
   const handleSend = () => {
     if (!input.trim()) return;
@@ -90,8 +127,23 @@ export const HomeView: React.FC<HomeViewProps> = ({
     }
   };
 
+  const toggleFavoriteAgent = (scenarioId: ScenarioId, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    setFavoriteAgentIds((prev) =>
+      prev.includes(scenarioId)
+        ? prev.filter((id) => id !== scenarioId)
+        : [...prev, scenarioId]
+    );
+  };
+
+  const displayedScenarios =
+    activeAgentTab === 'favorite'
+      ? allScenarios.filter((scenario) => favoriteAgentIds.includes(scenario.id))
+      : allScenarios;
+
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
+    <div className="relative h-screen flex flex-col bg-gray-50">
       {/* 主标题 */}
       <div className="text-center py-12">
         <h1 className="text-6xl font-bold text-gray-800 mb-4">
@@ -112,10 +164,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
           onStepGenerationToggle={() => setStepGenerationEnabled(!stepGenerationEnabled)}
           stepGenerationEnabled={stepGenerationEnabled}
           onKnowledgeBaseClick={() => setIsKnowledgeBaseOpen(true)}
-          selectedKnowledgeBases={selectedKnowledgeBases}
+          selectedKnowledgeBases={mountedKnowledgeBaseIds}
           onKnowledgeBaseRemove={(id) => {
-            setSelectedKnowledgeBases((prev) => prev.filter((item) => item !== id));
+            onMountedKnowledgeBaseChange(
+              mountedKnowledgeBaseIds.filter((item) => item !== id)
+            );
           }}
+          showMountedKnowledgeBasesInline
           selectedScenarioId={selectedAgentId || undefined}
           onMemoryClick={() => {
             setIsMemoryModalOpen(true);
@@ -143,7 +198,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
         {selectedAgentId && (() => {
           const selectedScenario = allScenarios.find(s => s.id === selectedAgentId);
           if (selectedScenario) {
-            const suggestedQuestion = `写一篇${selectedScenario.name}`;
+            const suggestedQuestion =
+              selectedScenario.suggestedQuestion || `写一篇${selectedScenario.name}`;
             const handleSuggestedQuestionClick = () => {
               setInput(suggestedQuestion);
               // 使用 setTimeout 确保输入框更新后再发送
@@ -177,10 +233,24 @@ export const HomeView: React.FC<HomeViewProps> = ({
           <div className="flex items-center gap-4">
             <h2 className="text-2xl font-semibold text-gray-700">智能体</h2>
             <div className="flex items-center gap-2">
-              <button className="px-3 py-1 text-sm font-medium text-blue-600 border-b-2 border-blue-600">
+              <button
+                onClick={() => setActiveAgentTab('organization')}
+                className={`px-3 py-1 text-sm font-medium border-b-2 transition-colors ${
+                  activeAgentTab === 'organization'
+                    ? 'text-blue-600 border-blue-600'
+                    : 'text-gray-500 border-transparent hover:text-gray-700'
+                }`}
+              >
                 我的组织
               </button>
-              <button className="px-3 py-1 text-sm font-medium text-gray-500 hover:text-gray-700">
+              <button
+                onClick={() => setActiveAgentTab('favorite')}
+                className={`px-3 py-1 text-sm font-medium border-b-2 transition-colors ${
+                  activeAgentTab === 'favorite'
+                    ? 'text-blue-600 border-blue-600'
+                    : 'text-gray-500 border-transparent hover:text-gray-700'
+                }`}
+              >
                 我的收藏
               </button>
             </div>
@@ -194,20 +264,33 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
         {/* 智能体卡片网格 */}
         <div className="grid grid-cols-3 gap-4">
-          {allScenarios.map((scenario) => {
+          {displayedScenarios.map((scenario) => {
             const IconComponent = getCategoryIcon(scenario.category);
             const isSelected = selectedAgentId === scenario.id;
             const colorClass = getCategoryColor(scenario.category);
+            const isFavorite = favoriteAgentIds.includes(scenario.id);
 
             return (
               <div
                 key={scenario.id}
                 onClick={() => handleAgentCardClick(scenario.id)}
-                className={`p-6 bg-white rounded-xl border-2 cursor-pointer transition-all hover:shadow-lg ${
+                className={`relative p-6 bg-white rounded-xl border-2 cursor-pointer transition-all hover:shadow-lg ${
                   isSelected ? colorClass : 'border-gray-200 hover:border-gray-300'
                 }`}
               >
-                <div className="flex items-start gap-4">
+                <button
+                  type="button"
+                  onClick={(e) => toggleFavoriteAgent(scenario.id, e)}
+                  className={`absolute right-4 top-4 rounded-full border p-1.5 transition-colors ${
+                    isFavorite
+                      ? 'border-blue-200 bg-blue-50 text-blue-500 hover:bg-blue-100'
+                      : 'border-gray-200 bg-white text-gray-400 hover:border-gray-300 hover:text-gray-600'
+                  }`}
+                  title={isFavorite ? '取消收藏' : '收藏智能体'}
+                >
+                  <Star className={`h-3.5 w-3.5 ${isFavorite ? 'fill-current' : ''}`} />
+                </button>
+                <div className="flex items-start gap-4 pr-8">
                   <div className={`p-3 rounded-lg ${
                     scenario.category === 'PLANNING' ? 'bg-purple-100' :
                     scenario.category === 'WORKFLOW' ? 'bg-blue-100' :
@@ -233,15 +316,21 @@ export const HomeView: React.FC<HomeViewProps> = ({
             );
           })}
         </div>
+
+        {activeAgentTab === 'favorite' && displayedScenarios.length === 0 && (
+          <div className="mt-6 rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
+            暂无收藏智能体，点击卡片右上角星标即可加入“我的收藏”
+          </div>
+        )}
       </div>
 
       {/* 知识库选择器弹窗 */}
       <KnowledgeBaseSelector
         isOpen={isKnowledgeBaseOpen}
         onClose={() => setIsKnowledgeBaseOpen(false)}
-        initialSelectedIds={selectedKnowledgeBases}
+        initialSelectedIds={mountedKnowledgeBaseIds}
         onConfirm={(selectedIds) => {
-          setSelectedKnowledgeBases(selectedIds);
+          onMountedKnowledgeBaseChange(selectedIds);
           setIsKnowledgeBaseOpen(false);
         }}
       />
@@ -263,6 +352,17 @@ export const HomeView: React.FC<HomeViewProps> = ({
           console.log('参数配置已更新:', values);
         }}
       />
+
+      <div className="pointer-events-none absolute bottom-5 right-6 z-10">
+        <div className="group pointer-events-auto inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-2 py-2 shadow-sm backdrop-blur-sm transition-all hover:border-gray-300 hover:shadow-md">
+          <span className="flex h-4 w-4 items-center justify-center rounded-full border border-gray-300 text-[10px] font-semibold lowercase leading-none text-gray-400">
+            c
+          </span>
+          <span className="max-w-0 overflow-hidden whitespace-nowrap text-xs text-gray-500 opacity-0 transition-all duration-200 group-hover:ml-1 group-hover:max-w-xs group-hover:opacity-100">
+            designed &amp; coded by Rowan DI
+          </span>
+        </div>
+      </div>
     </div>
   );
 };

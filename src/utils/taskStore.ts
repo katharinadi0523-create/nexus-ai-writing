@@ -3,8 +3,47 @@
  * 用于管理历史任务（最近任务）的创建、保存和恢复
  */
 
-import { Mode, WritingState } from '../types/writing';
+import type React from 'react';
+import { GeneralContentSource, Mode, WritingState } from '../types/writing';
 import { ScenarioId } from '../constants/mockData';
+import type { AgentConfigSnapshot, AgentWriteConfirmation, ChatMessageVariant } from '../types/chat';
+import type { WritingDocument } from '../types/document';
+
+/** 可序列化的消息格式（content 仅允许 string，便于 JSON 持久化） */
+export interface SerializableMessage {
+  role: 'user' | 'ai';
+  content: string;
+  variant?: ChatMessageVariant;
+  title?: string;
+  configSnapshot?: AgentConfigSnapshot;
+  writeConfirmation?: AgentWriteConfirmation;
+  documentId?: string;
+}
+
+/**
+ * 将消息转为可存储格式（JSX 转为占位符字符串）
+ */
+function serializeMessages(
+  messages: Array<{
+    role: 'user' | 'ai';
+    content: string | React.ReactNode;
+    variant?: ChatMessageVariant;
+    title?: string;
+    configSnapshot?: AgentConfigSnapshot;
+    writeConfirmation?: AgentWriteConfirmation;
+    documentId?: string;
+  }>
+): SerializableMessage[] {
+  return messages.map((m) => ({
+    role: m.role,
+    content: typeof m.content === 'string' ? m.content : '[已保存的会话内容]',
+    variant: m.variant,
+    title: m.title,
+    configSnapshot: m.configSnapshot,
+    writeConfirmation: m.writeConfirmation,
+    documentId: m.documentId,
+  }));
+}
 
 /**
  * 任务数据结构
@@ -26,6 +65,8 @@ export interface Task {
   input: string;
   /** 智能体 ID（如果有） */
   scenarioId?: ScenarioId;
+  /** 通用模式下的内容来源 */
+  generalContentSource?: GeneralContentSource;
   /** 文档内容 */
   content: string;
   /** 文档名称 */
@@ -36,8 +77,12 @@ export interface Task {
   memoryConfig: Record<string, any>;
   /** 参数配置 */
   paramsConfig: Record<string, any>;
-  /** 对话消息历史 */
-  messages: Array<{ role: 'user' | 'ai'; content: string | JSX.Element }>;
+  /** 当前任务下的全部文档 */
+  documents: WritingDocument[];
+  /** 当前打开的文档 ID */
+  activeDocumentId: string | null;
+  /** 对话消息历史（存储时 content 仅为 string） */
+  messages: SerializableMessage[];
 }
 
 const STORAGE_KEY = 'nexus_writing_tasks';
@@ -133,6 +178,8 @@ export function createTask(
     outline: '',
     memoryConfig: {},
     paramsConfig: {},
+    documents: [],
+    activeDocumentId: null,
     messages: [{ role: 'user', content: input }],
   };
   
@@ -142,16 +189,37 @@ export function createTask(
 
 /**
  * 更新任务状态
+ * 传入的 messages 若含 JSX，会自动转为可序列化格式
  */
-export function updateTask(taskId: string, updates: Partial<Task>): void {
+export function updateTask(
+  taskId: string,
+  updates: Partial<
+    Omit<Task, 'messages'> & {
+      messages?: Array<{
+        role: 'user' | 'ai';
+        content: string | React.ReactNode;
+        variant?: ChatMessageVariant;
+        title?: string;
+        configSnapshot?: AgentConfigSnapshot;
+        writeConfirmation?: AgentWriteConfirmation;
+        documentId?: string;
+      }>;
+    }
+  >
+): void {
   const task = getTask(taskId);
   if (!task) return;
-  
+
+  const { messages: rawMessages, ...rest } = updates;
+  const updatesToApply: Partial<Task> = { ...rest, updatedAt: Date.now() };
+  if (rawMessages !== undefined) {
+    updatesToApply.messages = serializeMessages(rawMessages);
+  }
+
   const updatedTask: Task = {
     ...task,
-    ...updates,
-    updatedAt: Date.now(),
+    ...updatesToApply,
   };
-  
+
   saveTask(updatedTask);
 }

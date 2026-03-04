@@ -1,10 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Mode } from './types/writing';
 import { ScenarioId, setActiveScenarioId } from './constants/mockData';
 import { HomeView } from './views/HomeView';
 import { WorkspaceView } from './views/WorkspaceView';
 import { Sidebar } from './components/Sidebar';
 import { createTask, Task } from './utils/taskStore';
+import {
+  getMountedKnowledgeBaseIds,
+  saveMountedKnowledgeBaseIds,
+} from './utils/mountedKnowledgeBaseStore';
 import './index.css';
 
 type ViewType = 'home' | 'workspace';
@@ -15,6 +19,13 @@ function App() {
   const [workspaceMode, setWorkspaceMode] = useState<Mode>(Mode.GENERAL);
   const [selectedScenarioId, setSelectedScenarioId] = useState<ScenarioId | null>(null);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+  const [mountedKnowledgeBaseIds, setMountedKnowledgeBaseIds] = useState<string[]>(
+    () => getMountedKnowledgeBaseIds()
+  );
+
+  useEffect(() => {
+    saveMountedKnowledgeBaseIds(mountedKnowledgeBaseIds);
+  }, [mountedKnowledgeBaseIds]);
 
   const handleStartWriting = (input: string, mode: Mode, scenarioId?: ScenarioId, taskId?: string) => {
     setWorkspaceInput(input);
@@ -32,15 +43,6 @@ function App() {
   const handleBackToHome = () => {
     setCurrentView('home');
     setCurrentTaskId(null);
-  };
-
-  const handleScenarioChange = (scenarioId: ScenarioId) => {
-    setActiveScenarioId(scenarioId);
-    setSelectedScenarioId(scenarioId);
-    // 如果当前在 workspace，可以切换到对应的场景
-    if (currentView === 'workspace') {
-      // 可以在这里实现场景切换逻辑
-    }
   };
 
   // 处理从任务恢复
@@ -61,15 +63,13 @@ function App() {
     handleStartWriting(input, mode, scenarioId, task.id);
   };
 
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
-
   return (
     <div className="h-screen flex">
-      {/* 侧边栏 - 在 HOME 和 WORKSPACE 都显示，WORKSPACE 时可以收起 */}
-      {(!isSidebarCollapsed || currentView === 'home') && (
+      {/* 左侧任务栏仅在首页显示；进入具体写作任务后隐藏 */}
+      {currentView === 'home' && (
         <Sidebar 
-          onScenarioChange={handleScenarioChange}
           onTaskRestore={handleTaskRestore}
+          currentView={currentView}
         />
       )}
 
@@ -80,6 +80,8 @@ function App() {
             onStartWriting={handleCreateTask}
             selectedScenarioId={selectedScenarioId || undefined}
             onScenarioSelect={setSelectedScenarioId}
+            mountedKnowledgeBaseIds={mountedKnowledgeBaseIds}
+            onMountedKnowledgeBaseChange={setMountedKnowledgeBaseIds}
           />
         )}
         {currentView === 'workspace' && (
@@ -89,8 +91,8 @@ function App() {
             initialScenarioId={selectedScenarioId || undefined}
             taskId={currentTaskId}
             onBack={handleBackToHome}
-            onSidebarToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            isSidebarCollapsed={isSidebarCollapsed}
+            mountedKnowledgeBaseIds={mountedKnowledgeBaseIds}
+            onMountedKnowledgeBaseChange={setMountedKnowledgeBaseIds}
           />
         )}
       </div>

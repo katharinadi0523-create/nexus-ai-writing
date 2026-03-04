@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { parseOutline, OutlineNode } from '../utils/outlineParser';
-import { getActiveScenarioData } from '../constants/mockData';
 
 interface OutlineConfirmProps {
   outline: string;
-  onConfirm: () => void;
+  fallbackTitle?: string;
+  onConfirm: (outline: string) => void;
   onCancel: () => void;
+  readOnly?: boolean;
 }
 
-// 从大纲中提取第一个一级标题
 const extractTitleFromOutline = (outline: string): string => {
   const h1Match = outline.match(/^#\s+(.+)$/m);
   if (h1Match) {
@@ -17,12 +17,47 @@ const extractTitleFromOutline = (outline: string): string => {
   return '';
 };
 
+function splitOutline(markdown: string) {
+  const parsed = parseOutline(markdown);
+  const firstNode = parsed[0];
+
+  if (firstNode?.level === 1) {
+    return {
+      title: firstNode.title,
+      nodes: firstNode.children,
+    };
+  }
+
+  return {
+    title: '',
+    nodes: parsed,
+  };
+}
+
+function serializeOutline(title: string, nodes: OutlineNode[]): string {
+  const safeTitle = title.trim() || '未命名文档';
+  const lines = [`# ${safeTitle}`];
+
+  const appendNodes = (items: OutlineNode[], level: number) => {
+    items.forEach((item) => {
+      lines.push(`${'#'.repeat(level)} ${item.title.trim()}`);
+      if (item.children.length > 0) {
+        appendNodes(item.children, Math.min(level + 1, 3));
+      }
+    });
+  };
+
+  appendNodes(nodes, 2);
+  return lines.join('\n');
+}
+
 interface EditableOutlineNodeProps {
   node: OutlineNode;
   depth: number;
   index: number;
   onEdit?: (node: OutlineNode, newTitle: string) => void;
   onDelete?: (node: OutlineNode) => void;
+  readOnly?: boolean;
 }
 
 const EditableOutlineNode: React.FC<EditableOutlineNodeProps> = ({
@@ -31,13 +66,18 @@ const EditableOutlineNode: React.FC<EditableOutlineNodeProps> = ({
   index,
   onEdit,
   onDelete,
+  readOnly = false,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(node.title);
 
+  useEffect(() => {
+    setEditValue(node.title);
+  }, [node.title]);
+
   const handleSave = () => {
     if (onEdit) {
-      onEdit(node, editValue);
+      onEdit(node, editValue.trim() || node.title);
     }
     setIsEditing(false);
   };
@@ -47,14 +87,14 @@ const EditableOutlineNode: React.FC<EditableOutlineNodeProps> = ({
     setIsEditing(false);
   };
 
-  const getNumberPrefix = (depth: number, index: number): string => {
-    if (depth === 0) {
-      return `${index + 1}. `;
-    } else if (depth === 1) {
-      return `${String.fromCharCode(97 + index)}. `; // a, b, c...
-    } else {
-      return `${index + 1}) `;
+  const getNumberPrefix = (currentDepth: number, currentIndex: number): string => {
+    if (currentDepth === 0) {
+      return `${currentIndex + 1}. `;
     }
+    if (currentDepth === 1) {
+      return `${String.fromCharCode(97 + currentIndex)}. `;
+    }
+    return `${currentIndex + 1}) `;
   };
 
   return (
@@ -69,13 +109,14 @@ const EditableOutlineNode: React.FC<EditableOutlineNodeProps> = ({
               type="text"
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}
-              onBlur={handleSave}
+              onBlur={readOnly ? undefined : handleSave}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSave();
-                if (e.key === 'Escape') handleCancel();
+                if (!readOnly && e.key === 'Enter') handleSave();
+                if (!readOnly && e.key === 'Escape') handleCancel();
               }}
               className="flex-1 px-2 py-1 border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
               autoFocus
+              disabled={readOnly}
             />
           </div>
         ) : (
@@ -84,32 +125,38 @@ const EditableOutlineNode: React.FC<EditableOutlineNodeProps> = ({
               className={`flex-1 text-gray-800 cursor-text ${
                 depth === 0 ? 'text-base font-semibold' : depth === 1 ? 'text-sm font-medium' : 'text-sm'
               }`}
-              onClick={() => setIsEditing(true)}
+              onClick={() => {
+                if (!readOnly) {
+                  setIsEditing(true);
+                }
+              }}
             >
               {node.title}
             </div>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                onClick={() => setIsEditing(true)}
-                className="p-1 hover:bg-gray-100 rounded"
-                title="编辑"
-              >
-                <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                </svg>
-              </button>
-              {onDelete && (
+            {!readOnly && (
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
-                  onClick={() => onDelete(node)}
+                  onClick={() => setIsEditing(true)}
                   className="p-1 hover:bg-gray-100 rounded"
-                  title="删除"
+                  title="编辑"
                 >
                   <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
                 </button>
-              )}
-            </div>
+                {onDelete && (
+                  <button
+                    onClick={() => onDelete(node)}
+                    className="p-1 hover:bg-gray-100 rounded"
+                    title="删除"
+                  >
+                    <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -123,6 +170,7 @@ const EditableOutlineNode: React.FC<EditableOutlineNodeProps> = ({
               index={childIndex}
               onEdit={onEdit}
               onDelete={onDelete}
+              readOnly={readOnly}
             />
           ))}
         </div>
@@ -131,40 +179,25 @@ const EditableOutlineNode: React.FC<EditableOutlineNodeProps> = ({
   );
 };
 
-export const OutlineConfirm: React.FC<OutlineConfirmProps> = ({ outline, onConfirm, onCancel }) => {
-  const [outlineNodes, setOutlineNodes] = useState<OutlineNode[]>(() => parseOutline(outline));
+export const OutlineConfirm: React.FC<OutlineConfirmProps> = ({
+  outline,
+  fallbackTitle,
+  onConfirm,
+  onCancel,
+  readOnly = false,
+}) => {
+  const [outlineNodes, setOutlineNodes] = useState<OutlineNode[]>([]);
   const [title, setTitle] = useState<string>('');
 
-  // 从大纲或场景数据中提取标题
   useEffect(() => {
-    // 优先从大纲中提取标题
-    const extractedTitle = extractTitleFromOutline(outline);
-    if (extractedTitle) {
-      setTitle(extractedTitle);
-    } else {
-      // 如果大纲中没有标题，尝试从场景数据中获取
-      const scenarioData = getActiveScenarioData();
-      if (scenarioData) {
-        // 尝试从 fullText 中提取标题
-        const fullTextTitle = extractTitleFromOutline(scenarioData.generalData.fullText);
-        if (fullTextTitle) {
-          setTitle(fullTextTitle);
-        } else {
-          // 最后使用场景名称
-          setTitle(scenarioData.name);
-        }
-      }
-    }
-  }, [outline]);
-
-  // 当 outline 变化时更新节点
-  React.useEffect(() => {
-    setOutlineNodes(parseOutline(outline));
-  }, [outline]);
+    const next = splitOutline(outline);
+    setOutlineNodes(next.nodes);
+    setTitle(next.title || fallbackTitle || extractTitleFromOutline(outline) || '');
+  }, [outline, fallbackTitle]);
 
   const handleEdit = (targetNode: OutlineNode, newTitle: string) => {
-    const updateNode = (nodes: OutlineNode[]): OutlineNode[] => {
-      return nodes.map((node) => {
+    const updateNode = (nodes: OutlineNode[]): OutlineNode[] =>
+      nodes.map((node) => {
         if (node === targetNode) {
           return { ...node, title: newTitle };
         }
@@ -173,25 +206,28 @@ export const OutlineConfirm: React.FC<OutlineConfirmProps> = ({ outline, onConfi
         }
         return node;
       });
-    };
-    setOutlineNodes(updateNode(outlineNodes));
+
+    setOutlineNodes((prev) => updateNode(prev));
   };
 
   const handleDelete = (targetNode: OutlineNode) => {
-    const removeNode = (nodes: OutlineNode[]): OutlineNode[] => {
-      return nodes
+    const removeNode = (nodes: OutlineNode[]): OutlineNode[] =>
+      nodes
         .filter((node) => node !== targetNode)
         .map((node) => ({
           ...node,
           children: node.children.length > 0 ? removeNode(node.children) : [],
         }));
-    };
-    setOutlineNodes(removeNode(outlineNodes));
+
+    setOutlineNodes((prev) => removeNode(prev));
+  };
+
+  const handleConfirm = () => {
+    onConfirm(serializeOutline(title, outlineNodes));
   };
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-4">
-      {/* 标题字段 */}
       <div className="mb-4">
         <label className="block text-sm font-medium text-gray-700 mb-1">标题</label>
         <input
@@ -200,10 +236,10 @@ export const OutlineConfirm: React.FC<OutlineConfirmProps> = ({ outline, onConfi
           onChange={(e) => setTitle(e.target.value)}
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
           placeholder="请输入标题"
+          disabled={readOnly}
         />
       </div>
 
-      {/* 内容区域（大纲） */}
       <div className="mb-4">
         <label className="block text-sm font-medium text-gray-700 mb-2">内容</label>
         <div className="bg-gray-50 rounded-md p-4 max-h-96 overflow-y-auto border border-gray-200">
@@ -218,21 +254,29 @@ export const OutlineConfirm: React.FC<OutlineConfirmProps> = ({ outline, onConfi
                 index={index}
                 onEdit={handleEdit}
                 onDelete={handleDelete}
+                readOnly={readOnly}
               />
             ))
           )}
         </div>
       </div>
 
-      {/* 操作按钮 */}
-      <div className="flex items-center justify-end">
-        <button
-          onClick={onConfirm}
-          className="px-6 py-2 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors"
-        >
-          基于大纲生成文档
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+          >
+            取消
+          </button>
+          <button
+            onClick={handleConfirm}
+            className="px-6 py-2 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors"
+          >
+            基于大纲生成文档
+          </button>
+        </div>
+      )}
     </div>
   );
 };

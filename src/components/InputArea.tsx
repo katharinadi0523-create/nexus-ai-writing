@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Mode } from '../types/writing';
 import { getActiveScenarioData, mockDataStore, setActiveScenarioId, ScenarioId, AgentCategory } from '../constants/mockData';
-import { Sparkles, Brain, GitBranch, List, BookOpen, Clock, Sliders, Paperclip, Mic, Send, ChevronUp, Search, ArrowLeftRight } from 'lucide-react';
+import { Sparkles, Brain, GitBranch, List, BookOpen, Clock, Sliders, Paperclip, Mic, Send, ChevronUp, Search, ArrowLeftRight, X } from 'lucide-react';
+import { getKnowledgeBasesByKeys } from '../constants/knowledgeBases';
 import { KnowledgeBaseList } from './KnowledgeBaseList';
 
 interface InputAreaProps {
@@ -20,6 +21,9 @@ interface InputAreaProps {
   selectedKnowledgeBases?: string[];
   onKnowledgeBaseRemove?: (id: string) => void;
   selectedScenarioId?: ScenarioId; // 添加当前选择的场景 ID
+  /** 已进入写作模式时隐藏智能体选择和模式切换，防止中途切换 */
+  hideAgentAndModeSelector?: boolean;
+  showMountedKnowledgeBasesInline?: boolean;
 }
 
 export const InputArea: React.FC<InputAreaProps> = ({
@@ -38,6 +42,8 @@ export const InputArea: React.FC<InputAreaProps> = ({
   selectedKnowledgeBases = [],
   onKnowledgeBaseRemove,
   selectedScenarioId,
+  hideAgentAndModeSelector = false,
+  showMountedKnowledgeBasesInline = false,
 }) => {
   const [isAgentDropdownOpen, setIsAgentDropdownOpen] = useState(false);
   const [isKnowledgeBaseListOpen, setIsKnowledgeBaseListOpen] = useState(false);
@@ -111,6 +117,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
     scenario.agentConfig.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     scenario.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+  const mountedKnowledgeBases = getKnowledgeBasesByKeys(selectedKnowledgeBases);
 
   // 渲染身份标识按钮（带下拉）
   const renderIdentityButton = () => {
@@ -283,10 +290,10 @@ export const InputArea: React.FC<InputAreaProps> = ({
         );
       }
     } else {
-      // 智能体模式：写作模式切换 + 记忆
+      // 智能体模式：写作模式切换 + 记忆（进入写作后不显示模式切换）
       // 确保在智能体模式下显示按钮
       if (agentConfig) {
-        if (onModeToggle) {
+        if (onModeToggle && !hideAgentAndModeSelector) {
           buttons.push(
             <button
               key="writing-mode"
@@ -299,7 +306,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
           );
         }
 
-        if (onMemoryClick) {
+        if (onMemoryClick && agentConfig.memoryConfigs.length > 0) {
           buttons.push(
             <button
               key="memory"
@@ -313,7 +320,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
         }
 
         // 工作流类额外增加参数按钮
-        if (category === 'WORKFLOW' && onParamsClick) {
+        if (category === 'WORKFLOW' && onParamsClick && agentConfig.paramConfigs.length > 0) {
           buttons.push(
             <button
               key="params"
@@ -335,9 +342,32 @@ export const InputArea: React.FC<InputAreaProps> = ({
     <div className="border-t border-gray-200 p-4 bg-white">
       {/* 功能按钮组 */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
-        {renderIdentityButton()}
+        {!hideAgentAndModeSelector && renderIdentityButton()}
         {renderFunctionButtons()}
       </div>
+
+      {showMountedKnowledgeBasesInline && mode === Mode.GENERAL && mountedKnowledgeBases.length > 0 ? (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {mountedKnowledgeBases.map((knowledgeBase) => (
+            <div
+              key={knowledgeBase.key}
+              className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-sm font-medium text-gray-700"
+            >
+              <span>{knowledgeBase.name}</span>
+              {onKnowledgeBaseRemove ? (
+                <button
+                  type="button"
+                  onClick={() => onKnowledgeBaseRemove(knowledgeBase.key)}
+                  className="rounded-full p-0.5 text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600"
+                  title={`取消挂载 ${knowledgeBase.name}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {/* 输入框 */}
       <div className="relative">

@@ -1,3 +1,5 @@
+import { handleCors } from './cors';
+
 type RewriteType = 'continue' | 'polish' | 'expand' | 'custom';
 
 interface QwenChatResponse {
@@ -82,6 +84,10 @@ function getBody(rawBody: unknown): RewriteBody {
 }
 
 export default async function handler(req: any, res: any) {
+  if (handleCors(req, res)) {
+    return;
+  }
+
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method Not Allowed' });
     return;

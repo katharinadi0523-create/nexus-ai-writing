@@ -13,6 +13,11 @@ export enum Mode {
 }
 
 /**
+ * 通用写作内容来源
+ */
+export type GeneralContentSource = 'api';
+
+/**
  * 写作状态
  */
 export enum WritingState {

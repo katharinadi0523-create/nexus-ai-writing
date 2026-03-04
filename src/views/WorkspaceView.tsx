@@ -1,12 +1,29 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Mode, WritingState, isValidTransition } from '../types/writing';
-import { getActiveScenarioData, ScenarioId, setActiveScenarioId } from '../constants/mockData';
+import { GeneralContentSource, Mode, WritingState, isValidTransition } from '../types/writing';
+import type {
+  CopilotProgressIntent,
+  CopilotProgressStage,
+  CopilotProgressState,
+  CopilotResponse,
+  PendingCopilotEdit,
+} from '../types/copilot';
+import { mockDataStore, ScenarioId, setActiveScenarioId } from '../constants/mockData';
 import { Editor } from '../components/Editor';
 import type { RewriteType } from '../components/RewriteWindow';
 import { CopilotSidebar } from '../components/CopilotSidebar';
 import { ArrowLeft, Clock, Edit2 } from 'lucide-react';
 import { getTask, updateTask } from '../utils/taskStore';
+import type { Task } from '../utils/taskStore';
+import { streamAgent } from '../services/agentClient';
+import { queryCopilotWithQwen } from '../services/copilotClient';
 import { rewriteWithQwen } from '../services/qwenClient';
+import { generateOutlineWithQwen, streamArticleWithQwen, streamThoughtWithQwen } from '../services/writingClient';
+import type {
+  AgentConfigSnapshot,
+  AgentWriteConfirmation,
+  ChatMessageVariant,
+} from '../types/chat';
+import type { WritingDocument, WritingDocumentStatus } from '../types/document';
 
 interface WorkspaceViewProps {
   initialInput: string;
@@ -14,9 +31,316 @@ interface WorkspaceViewProps {
   initialScenarioId?: ScenarioId;
   taskId?: string | null;
   onBack?: () => void;
-  onSidebarToggle?: () => void;
-  isSidebarCollapsed?: boolean;
+  mountedKnowledgeBaseIds: string[];
+  onMountedKnowledgeBaseChange: (ids: string[]) => void;
 }
+
+type ThinkingPhase = 'outline' | 'article' | 'edit' | null;
+type ThinkingStatus = 'idle' | 'streaming' | 'done' | 'error';
+type ChatMessage = {
+  id?: string;
+  role: 'user' | 'ai';
+  content: string | JSX.Element;
+  variant?: ChatMessageVariant;
+  title?: string;
+  configSnapshot?: AgentConfigSnapshot;
+  writeConfirmation?: AgentWriteConfirmation;
+  documentId?: string;
+};
+
+interface HeadingEntry {
+  title: string;
+  level: number;
+  start: number;
+}
+
+const getHeadingEntries = (document: string): HeadingEntry[] => {
+  const regex = /^#{1,6}\s+(.+)$/gm;
+  const headings: HeadingEntry[] = [];
+
+  for (const match of document.matchAll(regex)) {
+    const raw = match[0];
+    const title = match[1]?.trim();
+    const start = match.index ?? -1;
+    if (!title || start < 0) {
+      continue;
+    }
+
+    const levelMatch = raw.match(/^#{1,6}/);
+    headings.push({
+      title,
+      level: levelMatch ? levelMatch[0].length : 1,
+      start,
+    });
+  }
+
+  return headings;
+};
+
+const getSectionRange = (
+  document: string,
+  sectionTitle?: string
+): { start: number; end: number } | null => {
+  if (!sectionTitle?.trim()) {
+    return null;
+  }
+
+  const headings = getHeadingEntries(document);
+  const targetIndex = headings.findIndex((heading) => heading.title === sectionTitle.trim());
+  if (targetIndex === -1) {
+    return null;
+  }
+
+  const target = headings[targetIndex];
+  let end = document.length;
+
+  for (let index = targetIndex + 1; index < headings.length; index += 1) {
+    if (headings[index].level <= target.level) {
+      end = headings[index].start;
+      break;
+    }
+  }
+
+  return {
+    start: target.start,
+    end,
+  };
+};
+
+const findAllIndices = (source: string, target: string): number[] => {
+  if (!target) {
+    return [];
+  }
+
+  const indices: number[] = [];
+  let fromIndex = 0;
+
+  while (fromIndex <= source.length - target.length) {
+    const foundIndex = source.indexOf(target, fromIndex);
+    if (foundIndex === -1) {
+      break;
+    }
+
+    indices.push(foundIndex);
+    fromIndex = foundIndex + target.length;
+  }
+
+  return indices;
+};
+
+const resolveReplacementRange = (
+  document: string,
+  targetText: string,
+  sectionTitle?: string
+): { start: number; end: number } | null => {
+  const normalizedTarget = targetText.trim();
+  if (!normalizedTarget) {
+    return null;
+  }
+
+  const sectionRange = getSectionRange(document, sectionTitle);
+  if (sectionRange) {
+    const sectionText = document.slice(sectionRange.start, sectionRange.end);
+    const sectionMatches = findAllIndices(sectionText, normalizedTarget);
+    if (sectionMatches.length === 1) {
+      return {
+        start: sectionRange.start + sectionMatches[0],
+        end: sectionRange.start + sectionMatches[0] + normalizedTarget.length,
+      };
+    }
+  }
+
+  const globalMatches = findAllIndices(document, normalizedTarget);
+  if (globalMatches.length !== 1) {
+    return null;
+  }
+
+  return {
+    start: globalMatches[0],
+    end: globalMatches[0] + normalizedTarget.length,
+  };
+};
+
+const applyPendingEditToDocument = (
+  document: string,
+  pendingEdit: PendingCopilotEdit
+): string | null => {
+  const range = resolveReplacementRange(
+    document,
+    pendingEdit.targetText,
+    pendingEdit.sectionTitle
+  );
+  if (!range) {
+    return null;
+  }
+
+  return `${document.slice(0, range.start)}${pendingEdit.replacementText}${document.slice(range.end)}`;
+};
+
+const serializeChatHistory = (messages: ChatMessage[]): Array<{ role: 'user' | 'ai'; content: string }> => {
+  return messages
+    .filter(
+      (message): message is ChatMessage & { content: string } =>
+        typeof message.content === 'string' &&
+        message.content.trim().length > 0 &&
+        !message.variant
+    )
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+    }))
+    .slice(-4);
+};
+
+const upsertMessageById = (
+  messages: ChatMessage[],
+  nextMessage: ChatMessage & { id: string }
+): ChatMessage[] => {
+  const messageIndex = messages.findIndex((message) => message.id === nextMessage.id);
+  if (messageIndex === -1) {
+    return [...messages, nextMessage];
+  }
+
+  const nextMessages = [...messages];
+  nextMessages[messageIndex] = {
+    ...nextMessages[messageIndex],
+    ...nextMessage,
+  };
+  return nextMessages;
+};
+
+const appendMessage = (
+  messages: ChatMessage[],
+  nextMessage: ChatMessage
+): ChatMessage[] => {
+  if (nextMessage.id && messages.some((message) => message.id === nextMessage.id)) {
+    return messages;
+  }
+
+  return [...messages, nextMessage];
+};
+
+const createDocumentId = () => `doc_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+const EDIT_INTENT_PATTERN =
+  /(改写|修改|润色|扩写|扩充|精简|缩写|补充|补写|完善|优化|调整|重写|改成|改为|删除|增加|替换|续写|补全|改动)/;
+
+const EDIT_TARGET_PATTERN =
+  /(这段|这一段|这个段落|段落|章节|小节|这部分|原文|这句话|这句|这一节|标题)/;
+
+const RESTART_INTENT_PATTERN =
+  /(再写一篇|重写一篇|重新写|重新生成|重新来|另写一篇|换个主题|换一篇|新写一篇|再来一篇|重新开始写|重新开始生成|重新起草|再生成一篇|写一篇新的)/;
+
+const QA_INTENT_PATTERN =
+  /[?？]|为什么|为何|原因|哪些|哪里|如何|怎么|是否|是不是|有无|多少|总结|概括|解释|根据原文|根据文章|根据文档|文中|原文中|文章里|文档里/;
+
+const CHAT_INTENT_PATTERN = /(你好|在吗|谢谢|辛苦|收到|明白|好的|ok|可以|哈哈|聊聊|随便聊)/i;
+
+const COPILOT_PROGRESS_PLAN: Record<
+  CopilotProgressIntent,
+  Array<{ stage: CopilotProgressStage; delay: number }>
+> = {
+  unknown: [
+    { stage: 'routing', delay: 0 },
+    { stage: 'drafting', delay: 1400 },
+  ],
+  edit: [
+    { stage: 'routing', delay: 0 },
+    { stage: 'locating', delay: 900 },
+    { stage: 'rewriting', delay: 2600 },
+  ],
+  qa: [
+    { stage: 'routing', delay: 0 },
+    { stage: 'retrieving', delay: 900 },
+    { stage: 'answering', delay: 2600 },
+  ],
+  chat: [
+    { stage: 'routing', delay: 0 },
+    { stage: 'chatting', delay: 1200 },
+  ],
+  restart: [
+    { stage: 'routing', delay: 0 },
+    { stage: 'planning', delay: 1000 },
+  ],
+  agent_write_related: [
+    { stage: 'routing', delay: 0 },
+    { stage: 'planning', delay: 1000 },
+  ],
+  agent_write_unrelated: [
+    { stage: 'routing', delay: 0 },
+    { stage: 'planning', delay: 1000 },
+  ],
+};
+
+const isLikelyEditIntent = (query: string): boolean => {
+  const normalized = query.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    EDIT_INTENT_PATTERN.test(normalized) ||
+    (EDIT_TARGET_PATTERN.test(normalized) && /(改|写|删|补|扩|缩|润|调|优化|重写)/.test(normalized))
+  );
+};
+
+const predictCopilotIntent = (query: string): CopilotProgressIntent => {
+  const normalized = query.trim();
+  if (!normalized) {
+    return 'unknown';
+  }
+
+  if (isLikelyEditIntent(normalized)) {
+    return 'edit';
+  }
+
+  if (RESTART_INTENT_PATTERN.test(normalized)) {
+    return 'restart';
+  }
+
+  if (QA_INTENT_PATTERN.test(normalized)) {
+    return 'qa';
+  }
+
+  if (CHAT_INTENT_PATTERN.test(normalized)) {
+    return 'chat';
+  }
+
+  return 'unknown';
+};
+
+const buildInitialDocuments = (task: Task | null): WritingDocument[] => {
+  if (task?.documents?.length) {
+    return task.documents;
+  }
+
+  if (!task?.content?.trim()) {
+    return [];
+  }
+
+  return [
+    {
+      id: 'doc_legacy',
+      title: task.documentName || '新文档_1',
+      content: task.content,
+      prompt: task.input,
+      createdAt: task.updatedAt || task.createdAt || Date.now(),
+      status: task.writingState === WritingState.GENERATING ? 'generating' : 'finished',
+      scenarioId: task.scenarioId,
+    },
+  ];
+};
+
+const resolveInitialActiveDocumentId = (
+  task: Task | null,
+  documents: WritingDocument[]
+): string | null => {
+  if (task?.activeDocumentId && documents.some((document) => document.id === task.activeDocumentId)) {
+    return task.activeDocumentId;
+  }
+
+  return documents[0]?.id ?? null;
+};
 
 export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   initialInput,
@@ -24,40 +348,425 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   initialScenarioId,
   taskId,
   onBack,
-  onSidebarToggle,
-  isSidebarCollapsed = false,
+  mountedKnowledgeBaseIds,
+  onMountedKnowledgeBaseChange,
 }) => {
-  const [mode, setMode] = useState<Mode>(initialMode);
-  const [writingState, setWritingState] = useState<WritingState>(WritingState.THINKING);
-  const [input, setInput] = useState<string>(initialInput);
+  const initialTask = taskId ? getTask(taskId) : null;
+  const initialDocuments = buildInitialDocuments(initialTask);
+  const initialActiveDocumentId = resolveInitialActiveDocumentId(initialTask, initialDocuments);
+  const initialActiveDocument =
+    initialDocuments.find((document) => document.id === initialActiveDocumentId) || null;
+  const [mode, setMode] = useState<Mode>(initialTask?.mode ?? initialMode);
+  const [writingState, setWritingState] = useState<WritingState>(
+    initialTask?.writingState ?? WritingState.THINKING
+  );
+  const [input, setInput] = useState<string>('');
+  const [submittedPrompt, setSubmittedPrompt] = useState<string>(initialTask?.input ?? initialInput);
+  const [currentScenarioId, setCurrentScenarioId] = useState<ScenarioId | undefined>(
+    initialTask?.scenarioId ?? initialScenarioId
+  );
+  const [generalContentSource, setGeneralContentSource] = useState<GeneralContentSource>(
+    'api'
+  );
   const [agentId, setAgentId] = useState<string | undefined>();
-  const [memoryConfig, setMemoryConfig] = useState<Record<string, any>>({});
-  const [paramsConfig, setParamsConfig] = useState<Record<string, any>>({});
-  const [outline, setOutline] = useState<string>('');
-  const [content, setContent] = useState<string>('');
+  const [memoryConfig, setMemoryConfig] = useState<Record<string, any>>(
+    initialTask?.memoryConfig ?? {}
+  );
+  const [paramsConfig, setParamsConfig] = useState<Record<string, any>>(
+    initialTask?.paramsConfig ?? {}
+  );
+  const [outline, setOutline] = useState<string>(initialTask?.outline ?? '');
+  const [documents, setDocuments] = useState<WritingDocument[]>(initialDocuments);
+  const [activeDocumentId, setActiveDocumentId] = useState<string | null>(initialActiveDocumentId);
+  const [content, setContent] = useState<string>(
+    initialActiveDocument?.content ?? initialTask?.content ?? ''
+  );
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
-  const [documentName, setDocumentName] = useState<string>('新文档_1');
+  const [thinkingPhase, setThinkingPhase] = useState<ThinkingPhase>(null);
+  const [thinkingStatus, setThinkingStatus] = useState<ThinkingStatus>('idle');
+  const [thinkingContent, setThinkingContent] = useState<string>('');
+  const [documentName, setDocumentName] = useState<string>(
+    initialActiveDocument?.title ?? initialTask?.documentName ?? '新文档_1'
+  );
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'ai'; content: string | JSX.Element }>>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(
+    (initialTask?.messages ?? []).map((m) => ({
+      role: m.role,
+      content: m.content,
+      variant: m.variant,
+      title: m.title,
+      configSnapshot: m.configSnapshot,
+      writeConfirmation: m.writeConfirmation,
+      documentId: m.documentId,
+    }))
+  );
+  const [pendingCopilotEdit, setPendingCopilotEdit] = useState<PendingCopilotEdit | null>(null);
+  const [isCopilotResponding, setIsCopilotResponding] = useState<boolean>(false);
+  const [isApplyingPendingEdit, setIsApplyingPendingEdit] = useState<boolean>(false);
+  const [copilotProgress, setCopilotProgress] = useState<CopilotProgressState | null>(null);
   const currentTaskIdRef = useRef<string | null>(taskId || null);
+  const activeDocumentIdRef = useRef<string | null>(initialActiveDocumentId);
+  const generalRequestSeqRef = useRef(0);
+  const articleRequestSeqRef = useRef(0);
+  const articleStreamRef = useRef(0);
+  const thinkingRequestSeqRef = useRef(0);
+  const copilotProgressTimerRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
 
-  const scenarioData = getActiveScenarioData();
+  const scenarioData = currentScenarioId ? mockDataStore[currentScenarioId] || null : null;
 
-  // 从任务恢复状态
+  const loadDocumentIntoEditor = useCallback((document: WritingDocument | null) => {
+    setContent(document?.content || '');
+    setDocumentName(document?.title || '新文档_1');
+  }, []);
+
+  const applyDocumentPatch = useCallback(
+    (documentId: string, patch: Partial<WritingDocument>) => {
+      setDocuments((prev) =>
+        prev.map((document) =>
+          document.id === documentId ? { ...document, ...patch } : document
+        )
+      );
+
+      if (activeDocumentIdRef.current === documentId) {
+        if (patch.content !== undefined) {
+          setContent(patch.content);
+        }
+        if (patch.title !== undefined) {
+          setDocumentName(patch.title);
+        }
+      }
+    },
+    []
+  );
+
+  const createDocumentEntry = useCallback(
+    ({
+      prompt,
+      title,
+      status,
+      content: documentContent = '',
+    }: {
+      prompt: string;
+      title: string;
+      status: WritingDocumentStatus;
+      content?: string;
+    }) => {
+      const documentId = createDocumentId();
+      const nextDocument: WritingDocument = {
+        id: documentId,
+        title,
+        content: documentContent,
+        prompt,
+        createdAt: Date.now(),
+        status,
+        scenarioId: currentScenarioId,
+      };
+
+      setDocuments((prev) => [nextDocument, ...prev]);
+      setActiveDocumentId(documentId);
+      activeDocumentIdRef.current = documentId;
+      loadDocumentIntoEditor(nextDocument);
+      return documentId;
+    },
+    [currentScenarioId, loadDocumentIntoEditor]
+  );
+
+  const selectDocument = useCallback(
+    (documentId: string) => {
+      const targetDocument = documents.find((document) => document.id === documentId);
+      if (!targetDocument) {
+        return;
+      }
+
+      setActiveDocumentId(documentId);
+      activeDocumentIdRef.current = documentId;
+      setPendingCopilotEdit(null);
+      loadDocumentIntoEditor(targetDocument);
+    },
+    [documents, loadDocumentIntoEditor]
+  );
+
+  const deleteDocument = useCallback(
+    (documentId: string) => {
+      const targetIndex = documents.findIndex((document) => document.id === documentId);
+      if (targetIndex === -1) {
+        return;
+      }
+
+      const remainingDocuments = documents.filter((document) => document.id !== documentId);
+      const fallbackDocument =
+        remainingDocuments[targetIndex] || remainingDocuments[targetIndex - 1] || remainingDocuments[0] || null;
+
+      setDocuments(remainingDocuments);
+      setMessages((prev) =>
+        prev.filter(
+          (message) => !(message.variant === 'document-card' && message.documentId === documentId)
+        )
+      );
+
+      if (activeDocumentIdRef.current === documentId) {
+        const nextActiveDocumentId = fallbackDocument?.id || null;
+        setActiveDocumentId(nextActiveDocumentId);
+        activeDocumentIdRef.current = nextActiveDocumentId;
+        setPendingCopilotEdit(null);
+        loadDocumentIntoEditor(fallbackDocument);
+        return;
+      }
+
+      if (activeDocumentId === documentId) {
+        setActiveDocumentId(fallbackDocument?.id || null);
+        activeDocumentIdRef.current = fallbackDocument?.id || null;
+      }
+    },
+    [documents, activeDocumentId, loadDocumentIntoEditor]
+  );
+
+  const appendDocumentCardMessage = useCallback((documentId: string) => {
+    setMessages((prev) =>
+      appendMessage(prev, {
+        id: `document-card-${documentId}`,
+        role: 'ai',
+        content: '',
+        variant: 'document-card',
+        documentId,
+      })
+    );
+  }, []);
+
+  const extractFirstH1Title = useCallback((text: string): string | null => {
+    const h1Match = text.match(/^#\s+(.+)$/m);
+    if (h1Match) {
+      return h1Match[1].trim();
+    }
+    return null;
+  }, []);
+
+  const resetThinking = useCallback(() => {
+    thinkingRequestSeqRef.current += 1;
+    setThinkingPhase(null);
+    setThinkingStatus('idle');
+    setThinkingContent('');
+  }, []);
+
+  const clearCopilotProgressTimers = useCallback(() => {
+    copilotProgressTimerRef.current.forEach((timerId) => clearTimeout(timerId));
+    copilotProgressTimerRef.current = [];
+  }, []);
+
+  const resetCopilotProgress = useCallback(() => {
+    clearCopilotProgressTimers();
+    setCopilotProgress(null);
+  }, [clearCopilotProgressTimers]);
+
+  const startCopilotProgress = useCallback(
+    (query: string) => {
+      const predictedIntent = predictCopilotIntent(query);
+      const progressPlan = COPILOT_PROGRESS_PLAN[predictedIntent] || COPILOT_PROGRESS_PLAN.unknown;
+
+      clearCopilotProgressTimers();
+      setCopilotProgress({
+        intent: predictedIntent,
+        stage: progressPlan[0]?.stage || 'routing',
+      });
+
+      progressPlan.slice(1).forEach(({ stage, delay }) => {
+        const timerId = setTimeout(() => {
+          setCopilotProgress((current) => {
+            if (!current) {
+              return current;
+            }
+            return {
+              intent: current.intent,
+              stage,
+            };
+          });
+        }, delay);
+
+        copilotProgressTimerRef.current.push(timerId);
+      });
+
+      return predictedIntent;
+    },
+    [clearCopilotProgressTimers]
+  );
+
+  const streamRemoteThinking = useCallback(
+    async ({
+      phase,
+      prompt,
+      outline,
+      knowledgeBaseIds = [],
+      ignoreError = false,
+    }: {
+      phase: Exclude<ThinkingPhase, null>;
+      prompt: string;
+      outline?: string;
+      knowledgeBaseIds?: string[];
+      ignoreError?: boolean;
+    }) => {
+      const requestId = ++thinkingRequestSeqRef.current;
+      setThinkingPhase(phase);
+      setThinkingStatus('streaming');
+      setThinkingContent('');
+
+      try {
+        const finalThinking = await streamThoughtWithQwen({
+          prompt,
+          outline,
+          phase,
+          knowledgeBaseIds,
+          onChunk: (_delta, accumulated) => {
+            if (requestId !== thinkingRequestSeqRef.current) {
+              return;
+            }
+            setThinkingContent(accumulated);
+          },
+        });
+
+        if (requestId !== thinkingRequestSeqRef.current) {
+          return '';
+        }
+
+        setThinkingContent(finalThinking);
+        setThinkingStatus('done');
+        return finalThinking;
+      } catch (error) {
+        if (requestId !== thinkingRequestSeqRef.current) {
+          return '';
+        }
+
+        if (ignoreError) {
+          setThinkingPhase(null);
+          setThinkingStatus('idle');
+          setThinkingContent('');
+          return '';
+        }
+
+        const messageText = error instanceof Error ? error.message : '思考过程生成失败';
+        setThinkingStatus('error');
+        setThinkingContent(messageText);
+        throw error;
+      }
+    },
+    []
+  );
+
+  const runGeneralFlow = useCallback(
+    async (query: string) => {
+      const trimmedQuery = query.trim();
+      if (!trimmedQuery) {
+        return;
+      }
+
+      const requestId = ++generalRequestSeqRef.current;
+
+      setSubmittedPrompt(trimmedQuery);
+      setPendingCopilotEdit(null);
+      setIsCopilotResponding(false);
+      setIsApplyingPendingEdit(false);
+      resetCopilotProgress();
+      setWritingState(WritingState.THINKING);
+      setOutline('');
+      setContent('');
+      setIsGenerating(false);
+      setThinkingPhase('outline');
+      setThinkingStatus('streaming');
+      setThinkingContent('');
+
+      setCurrentScenarioId(undefined);
+      setGeneralContentSource('api');
+
+      try {
+        const thinkingPromise = streamRemoteThinking({
+          phase: 'outline',
+          prompt: trimmedQuery,
+          knowledgeBaseIds: mountedKnowledgeBaseIds,
+        }).catch(() => '');
+
+        const [generatedOutline] = await Promise.all([
+          generateOutlineWithQwen({
+            prompt: trimmedQuery,
+            knowledgeBaseIds: mountedKnowledgeBaseIds,
+          }),
+          thinkingPromise,
+        ]);
+
+        if (requestId !== generalRequestSeqRef.current) {
+          return;
+        }
+
+        setOutline(generatedOutline);
+        const title = extractFirstH1Title(generatedOutline);
+        if (title) {
+          setDocumentName(title);
+        }
+        setWritingState(WritingState.OUTLINE_CONFIRM);
+      } catch (error) {
+        if (requestId !== generalRequestSeqRef.current) {
+          return;
+        }
+
+        const messageText =
+          error instanceof Error ? error.message : '大纲生成失败，请稍后重试。';
+        setWritingState(WritingState.INPUT);
+        setMessages((prev) => [...prev, { role: 'ai', content: `大纲生成失败：${messageText}` }]);
+      }
+    },
+    [extractFirstH1Title, mountedKnowledgeBaseIds, streamRemoteThinking, resetCopilotProgress]
+  );
+
+  useEffect(() => {
+    if (currentScenarioId) {
+      setActiveScenarioId(currentScenarioId);
+    }
+  }, [currentScenarioId]);
+
+  useEffect(() => {
+    activeDocumentIdRef.current = activeDocumentId;
+  }, [activeDocumentId]);
+
   useEffect(() => {
     if (taskId) {
       const task = getTask(taskId);
       if (task) {
+        const taskDocuments = buildInitialDocuments(task);
+        const nextActiveDocumentId = resolveInitialActiveDocumentId(task, taskDocuments);
+        const nextActiveDocument =
+          taskDocuments.find((document) => document.id === nextActiveDocumentId) || null;
+
         currentTaskIdRef.current = taskId;
         setMode(task.mode);
         setWritingState(task.writingState);
-        setInput(task.input);
-        setContent(task.content);
-        setDocumentName(task.documentName);
+        setInput('');
+        setSubmittedPrompt(task.input);
+        setCurrentScenarioId(task.scenarioId);
+        setGeneralContentSource('api');
+        setDocuments(taskDocuments);
+        setActiveDocumentId(nextActiveDocumentId);
+        activeDocumentIdRef.current = nextActiveDocumentId;
+        setContent(nextActiveDocument?.content ?? task.content);
+        setThinkingPhase(null);
+        setThinkingStatus('idle');
+        setThinkingContent('');
+        setPendingCopilotEdit(null);
+        setIsCopilotResponding(false);
+        setIsApplyingPendingEdit(false);
+        resetCopilotProgress();
+        setDocumentName(nextActiveDocument?.title ?? task.documentName ?? '新文档_1');
         setOutline(task.outline);
         setMemoryConfig(task.memoryConfig || {});
         setParamsConfig(task.paramsConfig || {});
-        setMessages(task.messages || []);
+        setMessages(
+          (task.messages || []).map((m) => ({
+            role: m.role,
+            content: m.content,
+            variant: m.variant,
+            title: m.title,
+            configSnapshot: m.configSnapshot,
+            writeConfirmation: m.writeConfirmation,
+            documentId: m.documentId,
+          }))
+        );
         if (task.scenarioId) {
           setActiveScenarioId(task.scenarioId);
         }
@@ -65,27 +774,42 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     } else {
       currentTaskIdRef.current = null;
     }
-  }, [taskId]);
+  }, [taskId, resetCopilotProgress]);
 
-  // 保存任务状态（在返回时或状态变化时）
   const saveCurrentTask = useCallback(() => {
     if (currentTaskIdRef.current) {
-      // 使用最新的 messages，确保不会丢失
       updateTask(currentTaskIdRef.current, {
         mode,
         writingState,
-        input,
+        input: submittedPrompt,
         content,
         documentName,
         outline,
         memoryConfig,
         paramsConfig,
-        messages: messages.length > 0 ? messages : [], // 确保 messages 是数组
+        documents,
+        activeDocumentId,
+        messages: messages.length > 0 ? messages : [],
+        scenarioId: currentScenarioId,
+        generalContentSource,
       });
     }
-  }, [mode, writingState, input, content, documentName, outline, memoryConfig, paramsConfig, messages]);
+  }, [
+    mode,
+    writingState,
+    submittedPrompt,
+    content,
+    documentName,
+    outline,
+    memoryConfig,
+    paramsConfig,
+    documents,
+    activeDocumentId,
+    messages,
+    currentScenarioId,
+    generalContentSource,
+  ]);
 
-  // 在返回时保存任务
   const handleBack = useCallback(() => {
     saveCurrentTask();
     if (onBack) {
@@ -93,7 +817,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     }
   }, [saveCurrentTask, onBack]);
 
-  // 定期保存任务状态（每5秒）
   useEffect(() => {
     if (currentTaskIdRef.current) {
       const interval = setInterval(() => {
@@ -103,166 +826,54 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     }
   }, [saveCurrentTask]);
 
-  // 在关键状态变化时保存任务
   useEffect(() => {
     if (currentTaskIdRef.current) {
       saveCurrentTask();
     }
-  }, [writingState, content, documentName, messages, saveCurrentTask]);
+  }, [writingState, content, documentName, messages, outline, saveCurrentTask]);
 
-  // 初始化时设置场景ID
   useEffect(() => {
     if (initialScenarioId) {
+      setCurrentScenarioId(initialScenarioId);
       setActiveScenarioId(initialScenarioId);
     }
   }, [initialScenarioId]);
 
-  // 发送消息后，收起侧边栏
+  const [hasInitialized, setHasInitialized] = useState<boolean>(() => {
+    if (taskId) {
+      const task = getTask(taskId);
+      if (task && (task.content || task.writingState !== WritingState.THINKING)) {
+        return true;
+      }
+    }
+    return false;
+  });
+
   useEffect(() => {
-    if ((writingState === WritingState.THINKING || writingState === WritingState.OUTLINE_CONFIRM || writingState === WritingState.GENERATING) && onSidebarToggle && !isSidebarCollapsed) {
-      onSidebarToggle();
-    }
-  }, [writingState, onSidebarToggle, isSidebarCollapsed]);
-
-  // 从内容中提取第一个一级标题
-  const extractFirstH1Title = (text: string): string | null => {
-    const h1Match = text.match(/^#\s+(.+)$/m);
-    if (h1Match) {
-      return h1Match[1].trim();
-    }
-    return null;
-  };
-
-  // 流式生成内容
-  const generatingRef = useRef<boolean>(false);
-  const contentUpdateRef = useRef<string>('');
-  
-  useEffect(() => {
-    // 如果是从任务恢复且已有内容且状态不是 GENERATING，不重新生成
-    if (taskId && content && writingState !== WritingState.GENERATING) {
-      generatingRef.current = false;
-      return;
-    }
-    
-    // 只在 GENERATING 状态且 isGenerating 为 true 时执行，且未在生成中
-    if (writingState === WritingState.GENERATING && isGenerating && scenarioData && !generatingRef.current) {
-      generatingRef.current = true;
-      contentUpdateRef.current = '';
-      const fullText = scenarioData.generalData.fullText;
-      let currentIndex = 0; // 总是从0开始，因为确认大纲后内容被重置
-      let titleExtracted = false;
-      
-      // 使用 requestAnimationFrame 来优化更新频率，减少卡顿
-      let lastUpdateTime = 0;
-      const updateInterval = 100; // 每100ms更新一次，而不是每50ms
-      
-      const updateContent = (timestamp: number) => {
-        if (currentIndex < fullText.length) {
-          // 控制更新频率
-          if (timestamp - lastUpdateTime >= updateInterval) {
-            const newContent = fullText.substring(0, currentIndex + 20); // 每次增加20个字符
-            contentUpdateRef.current = newContent;
-            setContent(newContent);
-            
-            // 提取第一个一级标题并更新文档标题
-            if (!titleExtracted) {
-              const extractedTitle = extractFirstH1Title(newContent);
-              if (extractedTitle) {
-                setDocumentName(extractedTitle);
-                titleExtracted = true;
-              }
-            }
-            
-            currentIndex += 20;
-            lastUpdateTime = timestamp;
-          }
-          
-          requestAnimationFrame(updateContent);
-        } else {
-          // 生成完成
-          generatingRef.current = false;
-          setWritingState(WritingState.FINISHED);
-          setIsGenerating(false);
-          
-          // 确保最终也提取标题（防止流式生成时未捕获到）
-          const finalTitle = extractFirstH1Title(fullText);
-          if (finalTitle && !titleExtracted) {
-            setDocumentName(finalTitle);
-          }
-          
-          // 流式生成完成后，设置最终内容
-          setContent(fullText);
-          contentUpdateRef.current = fullText;
-          
-          // 添加生成完成消息
-          setMessages(prev => {
-            // 检查是否已经有"全文生成完毕"消息
-            const hasCompletionMessage = prev.some(m => 
-              typeof m.content === 'string' && m.content.includes('全文生成完毕')
-            );
-            if (!hasCompletionMessage) {
-              return [...prev, { role: 'ai', content: '全文生成完毕' }];
-            }
-            return prev;
-          });
-        }
-      };
-      
-      requestAnimationFrame(updateContent);
-
-      return () => {
-        generatingRef.current = false;
-      };
-    } else if (writingState !== WritingState.GENERATING) {
-      generatingRef.current = false;
-    }
-  }, [writingState, isGenerating, scenarioData, taskId]);
-
-  // 初始化：从 THINKING 状态开始（仅在首次加载且有输入时，且不是从任务恢复）
-  const [hasInitialized, setHasInitialized] = useState<boolean>(false);
-  
-  useEffect(() => {
-    // 如果是从任务恢复，检查任务状态
     if (taskId) {
       const task = getTask(taskId);
       if (task) {
-        // 如果任务已经有内容或状态不是 THINKING，说明是恢复的任务，跳过初始化
         if (task.content || task.writingState !== WritingState.THINKING) {
           setHasInitialized(true);
           return;
         }
-        // 如果是新创建的任务（状态是 THINKING 且没有内容），继续初始化流程
       }
     }
-    
-    // 只在有初始输入且还未初始化时执行
+
     if (initialInput && !hasInitialized && writingState === WritingState.THINKING) {
       setHasInitialized(true);
-      
+
       if (mode === Mode.GENERAL) {
-        // 模拟思考过程，然后进入大纲确认
-        setTimeout(() => {
-          if (scenarioData && scenarioData.generalData.outline) {
-            setOutline(scenarioData.generalData.outline);
-            // 确保 outline 设置后再更新状态
-            setTimeout(() => {
-              setWritingState(WritingState.OUTLINE_CONFIRM);
-            }, 0);
-          } else {
-            setWritingState(WritingState.OUTLINE_CONFIRM);
-          }
-        }, 1500);
+        void runGeneralFlow(initialInput);
       } else {
-        // 智能体模式
         if (scenarioData) {
           setAgentId(scenarioData.agentConfig.id);
         }
         setWritingState(WritingState.INPUT);
       }
     }
-  }, [initialInput, hasInitialized, mode, scenarioData, writingState, taskId]);
+  }, [initialInput, hasInitialized, writingState, mode, taskId, runGeneralFlow, scenarioData]);
 
-  // 检测输入中的 @ 字符，切换到智能体模式
   useEffect(() => {
     if (input.includes('@') && mode === Mode.GENERAL) {
       setMode(Mode.AGENT);
@@ -273,139 +884,742 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     }
   }, [input, mode, scenarioData]);
 
-  // 当切换到智能体模式时，自动设置智能体 ID
   useEffect(() => {
     if (mode === Mode.AGENT && !agentId && scenarioData) {
       setAgentId(scenarioData.agentConfig.id);
     }
   }, [mode, agentId, scenarioData]);
 
-  // 处理发送查询
-  const handleSendQuery = useCallback(() => {
-    if (!input.trim()) return;
+  const handleDocumentCopilotResult = useCallback(
+    (trimmedQuery: string, result: CopilotResponse) => {
+      if (result.intent === 'edit') {
+        if (
+          result.edit?.status === 'ready' &&
+          result.edit.targetText?.trim() &&
+          typeof result.edit.replacementText === 'string'
+        ) {
+          const nextPendingEdit: PendingCopilotEdit = {
+            instruction: trimmedQuery,
+            sectionTitle: result.edit.sectionTitle?.trim() || undefined,
+            targetText: result.edit.targetText,
+            replacementText: result.edit.replacementText,
+          };
 
-    if (mode === Mode.GENERAL) {
-      // 通用模式：INPUT -> THINKING
-      setWritingState(WritingState.THINKING);
-      
-      // 模拟思考过程，然后进入大纲确认
-      setTimeout(() => {
-        if (scenarioData && scenarioData.generalData.outline) {
-          setOutline(scenarioData.generalData.outline);
-          // 确保 outline 设置后再更新状态
-          setTimeout(() => {
-            setWritingState(WritingState.OUTLINE_CONFIRM);
-          }, 0);
-        } else {
-          setWritingState(WritingState.OUTLINE_CONFIRM);
+          const previewDocument = applyPendingEditToDocument(content, nextPendingEdit);
+          if (!previewDocument) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: 'ai',
+                content: '我暂时没法稳定定位到唯一修改位置，请再说具体章节名，或者直接贴出要修改的原句。',
+              },
+            ]);
+            return;
+          }
+
+          setPendingCopilotEdit(nextPendingEdit);
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'ai',
+              content: result.reply.trim() || '我已经定位到对应内容，请确认是否接受这次修改。',
+            },
+          ]);
+          return;
         }
-      }, 1500);
-    }
-  }, [input, mode, scenarioData]);
 
-  // 处理大纲确认
-  const handleOutlineConfirm = useCallback(() => {
-    if (isValidTransition(mode, writingState, WritingState.GENERATING)) {
-      // 先重置内容，然后设置状态
-      // 注意：不要重置 messages，保持对话历史
-      setContent('');
-      setWritingState(WritingState.GENERATING);
-      setIsGenerating(true);
-      
-      // 添加用户确认消息
-      setMessages(prev => [...prev, { role: 'user', content: '确认大纲，开始生成' }]);
-      
-      // 如果场景数据中有fullText，提前提取标题
-      if (scenarioData?.generalData.fullText) {
-        const extractedTitle = extractFirstH1Title(scenarioData.generalData.fullText);
-        if (extractedTitle) {
-          setDocumentName(extractedTitle);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'ai',
+            content: result.reply.trim() || '我还需要你再说明一下具体要改哪一段。',
+          },
+        ]);
+        return;
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'ai',
+          content: result.reply.trim() || '我暂时没有可返回的内容，请稍后再试。',
+        },
+      ]);
+    },
+    [content]
+  );
+
+  const handleGeneralCopilotTurn = useCallback(
+    async (query: string) => {
+      const trimmedQuery = query.trim();
+      if (!trimmedQuery || !content.trim()) {
+        return;
+      }
+
+      setPendingCopilotEdit(null);
+      setIsCopilotResponding(true);
+      startCopilotProgress(trimmedQuery);
+      let startedNewWritingFlow = false;
+
+      try {
+        const result = await queryCopilotWithQwen({
+          message: trimmedQuery,
+          document: content,
+          outline,
+          title: documentName,
+          history: serializeChatHistory(messages),
+          mode: 'general',
+          knowledgeBaseIds: mountedKnowledgeBaseIds,
+        });
+
+        if (result.intent === 'restart') {
+          setIsCopilotResponding(false);
+          resetCopilotProgress();
+          startedNewWritingFlow = true;
+          void runGeneralFlow(result.topic?.trim() || trimmedQuery);
+          return;
+        }
+
+        handleDocumentCopilotResult(trimmedQuery, result);
+      } catch (error) {
+        const messageText = error instanceof Error ? error.message : 'Copilot 处理失败，请稍后重试。';
+        setMessages((prev) => [...prev, { role: 'ai', content: `处理失败：${messageText}` }]);
+      } finally {
+        setIsCopilotResponding(false);
+        if (!startedNewWritingFlow) {
+          resetCopilotProgress();
         }
       }
-      
-      // 确保消息被保存
+    },
+    [
+      content,
+      outline,
+      documentName,
+      messages,
+      startCopilotProgress,
+      resetCopilotProgress,
+      runGeneralFlow,
+      handleDocumentCopilotResult,
+      mountedKnowledgeBaseIds,
+    ]
+  );
+
+  function handleConfirmAgentWrite(messageId: string) {
+    const confirmationMessage = messages.find((message) => message.id === messageId);
+    const topic = confirmationMessage?.writeConfirmation?.topic?.trim();
+    if (!topic) {
+      return;
+    }
+
+    setMessages((prev) => {
+      const updatedMessages = prev.map((message) =>
+        message.id === messageId && message.writeConfirmation
+          ? {
+              ...message,
+              writeConfirmation: {
+                ...message.writeConfirmation,
+                status: 'confirmed' as const,
+              },
+            }
+          : message
+      );
+
+      return [
+        ...updatedMessages,
+        {
+          role: 'user',
+          content: `确认使用当前智能体生成：${topic}`,
+        },
+      ];
+    });
+
+    startAgentDocumentGeneration({
+      promptText: topic,
+      appendConfigSnapshot: false,
+    });
+  }
+
+  function handleCancelAgentWrite(messageId: string) {
+    setMessages((prev) => {
+      const updatedMessages = prev.map((message) =>
+        message.id === messageId && message.writeConfirmation
+          ? {
+              ...message,
+              writeConfirmation: {
+                ...message.writeConfirmation,
+                status: 'cancelled' as const,
+              },
+            }
+          : message
+      );
+
+      return [
+        ...updatedMessages,
+        {
+          role: 'ai',
+          content: '已取消使用当前智能体生成该主题。',
+        },
+      ];
+    });
+  }
+
+  async function handleAgentCopilotTurn(query: string) {
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery || !content.trim() || !scenarioData?.agentConfig) {
+      return;
+    }
+
+    setPendingCopilotEdit(null);
+    setIsCopilotResponding(true);
+    startCopilotProgress(trimmedQuery);
+    let startedNewWritingFlow = false;
+
+    try {
+      const result = await queryCopilotWithQwen({
+        message: trimmedQuery,
+        document: content,
+        outline,
+        title: documentName,
+        history: serializeChatHistory(messages),
+        mode: 'agent',
+        agentContext: {
+          agentName: scenarioData.agentConfig.name,
+          agentDescription: scenarioData.agentConfig.description,
+        },
+      });
+
+      if (result.intent === 'agent_write_related' || result.intent === 'restart') {
+        setIsCopilotResponding(false);
+        resetCopilotProgress();
+        startedNewWritingFlow = true;
+        startAgentDocumentGeneration({
+          promptText: result.topic || trimmedQuery,
+          appendConfigSnapshot: false,
+        });
+        return;
+      }
+
+      if (result.intent === 'agent_write_unrelated') {
+        const topic = result.topic?.trim() || trimmedQuery;
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `agent-write-confirmation-${Date.now()}`,
+            role: 'ai',
+            content:
+              result.reply.trim() ||
+              `如果需要非当前智能体相关主题的写作，可以新开任务，使用通用智能体模式；请问您确认要使用当前智能体生成《${topic}》吗？`,
+            variant: 'agent-write-confirmation',
+            writeConfirmation: {
+              topic,
+              agentName: scenarioData.agentConfig.name,
+              status: 'pending',
+            },
+          },
+        ]);
+        return;
+      }
+
+      handleDocumentCopilotResult(trimmedQuery, result);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : 'Copilot 处理失败，请稍后重试。';
+      setMessages((prev) => [...prev, { role: 'ai', content: `处理失败：${messageText}` }]);
+    } finally {
+      setIsCopilotResponding(false);
+      if (!startedNewWritingFlow) {
+        resetCopilotProgress();
+      }
+    }
+  }
+
+  function handleSendQuery() {
+    const query = input.trim();
+    if (!query) {
+      return;
+    }
+
+    setInput('');
+
+    if (mode === Mode.GENERAL) {
+      if (writingState === WritingState.FINISHED && content.trim()) {
+        void handleGeneralCopilotTurn(query);
+        return;
+      }
+
+      void runGeneralFlow(query);
+      return;
+    }
+
+    if (mode === Mode.AGENT && writingState === WritingState.FINISHED && content.trim()) {
+      void handleAgentCopilotTurn(query);
+    }
+  }
+
+  const handleAcceptPendingEdit = useCallback(() => {
+    if (!pendingCopilotEdit) {
+      return;
+    }
+
+    setIsApplyingPendingEdit(true);
+    const nextContent = applyPendingEditToDocument(content, pendingCopilotEdit);
+    if (!nextContent) {
+      setPendingCopilotEdit(null);
+      setIsApplyingPendingEdit(false);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'ai',
+          content: '应用修改失败：文档内容已经变化，请重新描述这次修改需求。',
+        },
+      ]);
+      return;
+    }
+
+    const nextTitle = extractFirstH1Title(nextContent);
+    if (activeDocumentIdRef.current) {
+      applyDocumentPatch(activeDocumentIdRef.current, {
+        content: nextContent,
+        ...(nextTitle ? { title: nextTitle } : {}),
+        status: 'finished',
+        errorMessage: undefined,
+      });
+    } else {
+      setContent(nextContent);
+      if (nextTitle) {
+        setDocumentName(nextTitle);
+      }
+    }
+    setPendingCopilotEdit(null);
+    setIsApplyingPendingEdit(false);
+    setMessages((prev) => [...prev, { role: 'ai', content: '已根据你的要求更新左侧文档。' }]);
+  }, [content, pendingCopilotEdit, extractFirstH1Title, applyDocumentPatch]);
+
+  const handleRejectPendingEdit = useCallback(() => {
+    if (!pendingCopilotEdit) {
+      return;
+    }
+
+    setPendingCopilotEdit(null);
+    setMessages((prev) => [...prev, { role: 'ai', content: '这次修改已取消，你可以继续补充更精确的要求。' }]);
+  }, [pendingCopilotEdit]);
+
+  const handleOutlineConfirm = useCallback(
+    async (confirmedOutline: string) => {
+      if (!isValidTransition(mode, writingState, WritingState.GENERATING)) {
+        return;
+      }
+
+      setOutline(confirmedOutline);
+      setPendingCopilotEdit(null);
+      setWritingState(WritingState.GENERATING);
+      setIsGenerating(true);
+      setMessages((prev) => [...prev, { role: 'user', content: '确认大纲，开始生成' }]);
+
+      const outlineTitle = extractFirstH1Title(confirmedOutline);
+      const initialDocumentTitle =
+        outlineTitle || submittedPrompt.slice(0, 40) || '新文档_1';
+      const documentId = createDocumentEntry({
+        prompt: submittedPrompt,
+        title: initialDocumentTitle,
+        status: 'generating',
+      });
+      appendDocumentCardMessage(documentId);
+
       if (currentTaskIdRef.current) {
         saveCurrentTask();
       }
-    }
-  }, [mode, writingState, scenarioData, saveCurrentTask]);
 
-  // 处理模式切换
-  const handleModeToggle = useCallback((newMode: Mode) => {
-    setMode(newMode);
-    setWritingState(WritingState.INPUT);
-    if (newMode === Mode.AGENT && scenarioData) {
-      setAgentId(scenarioData.agentConfig.id);
-    } else {
-      setAgentId(undefined);
-      setMemoryConfig({});
-      setParamsConfig({});
-    }
-  }, [scenarioData]);
+      const requestId = ++articleRequestSeqRef.current;
+      const streamId = ++articleStreamRef.current;
+      const thinkingRequestId = ++thinkingRequestSeqRef.current;
+      let hasReceivedThought = false;
+      setThinkingPhase('article');
+      setThinkingStatus('streaming');
+      setThinkingContent('');
 
-  // 处理记忆配置更新
+      try {
+        const generatedArticle = await streamArticleWithQwen({
+          prompt: submittedPrompt,
+          outline: confirmedOutline,
+          knowledgeBaseIds: mountedKnowledgeBaseIds,
+          onThoughtChunk: (_delta, accumulatedThought) => {
+            if (thinkingRequestId !== thinkingRequestSeqRef.current) {
+              return;
+            }
+            hasReceivedThought = true;
+            setThinkingStatus('streaming');
+            setThinkingContent(accumulatedThought);
+          },
+          onChunk: (_delta, accumulated) => {
+            if (streamId !== articleStreamRef.current) {
+              return;
+            }
+
+            if (thinkingRequestId === thinkingRequestSeqRef.current) {
+              setThinkingStatus(hasReceivedThought ? 'done' : 'idle');
+            }
+
+            const streamedTitle = extractFirstH1Title(accumulated);
+            applyDocumentPatch(documentId, {
+              content: accumulated,
+              ...(streamedTitle ? { title: streamedTitle } : {}),
+            });
+          },
+        });
+
+        if (requestId !== articleRequestSeqRef.current) {
+          return;
+        }
+
+        if (thinkingRequestId === thinkingRequestSeqRef.current) {
+          setThinkingStatus(hasReceivedThought ? 'done' : 'idle');
+        }
+
+        const finalTitle = extractFirstH1Title(generatedArticle);
+        applyDocumentPatch(documentId, {
+          content: generatedArticle,
+          title: finalTitle || initialDocumentTitle,
+          status: 'finished',
+          errorMessage: undefined,
+        });
+        setIsGenerating(false);
+        setWritingState(WritingState.FINISHED);
+      } catch (error) {
+        if (requestId !== articleRequestSeqRef.current) {
+          return;
+        }
+
+        const messageText =
+          error instanceof Error ? error.message : '全文生成失败，请稍后重试。';
+        if (thinkingRequestId === thinkingRequestSeqRef.current) {
+          setThinkingStatus('error');
+          setThinkingContent((prev) => prev.trim() || messageText);
+        }
+        applyDocumentPatch(documentId, {
+          status: 'error',
+          errorMessage: messageText,
+        });
+        setWritingState(WritingState.OUTLINE_CONFIRM);
+        setIsGenerating(false);
+        setMessages((prev) => [...prev, { role: 'ai', content: `全文生成失败：${messageText}` }]);
+      }
+    },
+    [
+      mode,
+      writingState,
+      appendDocumentCardMessage,
+      createDocumentEntry,
+      extractFirstH1Title,
+      saveCurrentTask,
+      submittedPrompt,
+      applyDocumentPatch,
+      mountedKnowledgeBaseIds,
+    ]
+  );
+
+  const handleModeToggle = useCallback(
+    (newMode: Mode) => {
+      setMode(newMode);
+      setWritingState(WritingState.INPUT);
+      setIsGenerating(false);
+      setPendingCopilotEdit(null);
+      setIsCopilotResponding(false);
+      setIsApplyingPendingEdit(false);
+      resetCopilotProgress();
+      resetThinking();
+
+      if (newMode === Mode.AGENT && scenarioData) {
+        setAgentId(scenarioData.agentConfig.id);
+      } else {
+        setAgentId(undefined);
+        setMemoryConfig({});
+        setParamsConfig({});
+        setCurrentScenarioId(undefined);
+        setGeneralContentSource('api');
+      }
+    },
+    [scenarioData, resetCopilotProgress, resetThinking]
+  );
+
+  useEffect(() => {
+    return () => {
+      clearCopilotProgressTimers();
+    };
+  }, [clearCopilotProgressTimers]);
+
   const handleMemoryConfigChange = useCallback((config: Record<string, any>) => {
     setMemoryConfig(config);
   }, []);
 
-  // 处理参数配置更新
   const handleParamsConfigChange = useCallback((config: Record<string, any>) => {
     setParamsConfig(config);
   }, []);
 
-  // 处理开始生成（智能体模式）
+  const buildAgentConfigSnapshot = useCallback((): AgentConfigSnapshot | null => {
+    if (!scenarioData?.agentConfig) {
+      return null;
+    }
+
+    const memoryItems = scenarioData.agentConfig.memoryConfigs.reduce<AgentConfigSnapshot['memoryItems']>(
+      (items, config) => {
+        const value = memoryConfig[config.key];
+        if (typeof value === 'string') {
+          if (!value.trim()) {
+            return items;
+          }
+          items.push({
+            key: config.key,
+            label: config.label,
+            value: value.trim(),
+          });
+          return items;
+        }
+
+        if (value !== undefined && value !== null) {
+          items.push({
+            key: config.key,
+            label: config.label,
+            value: String(value),
+          });
+        }
+
+        return items;
+      },
+      []
+    );
+
+    const paramItems = scenarioData.agentConfig.paramConfigs.reduce<AgentConfigSnapshot['paramItems']>(
+      (items, config) => {
+        const value = paramsConfig[config.key];
+        if (typeof value === 'string') {
+          if (!value.trim()) {
+            return items;
+          }
+          items.push({
+            key: config.key,
+            label: config.label,
+            value: value.trim(),
+            type: config.type,
+          });
+          return items;
+        }
+
+        if (value !== undefined && value !== null) {
+          items.push({
+            key: config.key,
+            label: config.label,
+            value: String(value),
+            type: config.type,
+          });
+        }
+
+        return items;
+      },
+      []
+    );
+
+    return {
+      agentName: scenarioData.agentConfig.name,
+      agentDescription: scenarioData.agentConfig.description,
+      memoryItems,
+      paramItems,
+    };
+  }, [memoryConfig, paramsConfig, scenarioData]);
+
+  const startAgentDocumentGeneration = useCallback(
+    ({
+      promptText,
+      appendConfigSnapshot,
+    }: {
+      promptText: string;
+      appendConfigSnapshot: boolean;
+    }) => {
+      const trimmedPrompt = promptText.trim();
+      if (!trimmedPrompt) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'ai',
+            content: '当前智能体缺少可用问题，请先返回首页输入问题后再开始生成。',
+          },
+        ]);
+        return;
+      }
+
+      if (scenarioData?.agentRuntime?.source !== 'appforge') {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'ai',
+            content: '当前智能体已下线或尚未接入真实接口，无法继续生成。',
+          },
+        ]);
+        return;
+      }
+
+      const initialDocumentTitle =
+        trimmedPrompt.slice(0, 40) || scenarioData?.name || '新文档_1';
+      const configSnapshot = buildAgentConfigSnapshot();
+      const agentInputs = scenarioData.agentConfig.paramConfigs.reduce<Record<string, unknown>>(
+        (acc, config) => {
+          const value = paramsConfig[config.key];
+          if (typeof value === 'string') {
+            if (value.trim()) {
+              acc[config.key] = value.trim();
+            }
+            return acc;
+          }
+
+          if (value !== undefined && value !== null) {
+            acc[config.key] = value;
+          }
+          return acc;
+        },
+        {}
+      );
+
+      setInput('');
+      setSubmittedPrompt(trimmedPrompt);
+      setWritingState(WritingState.GENERATING);
+      setIsGenerating(false);
+      setPendingCopilotEdit(null);
+      setThinkingPhase(null);
+      setThinkingStatus('idle');
+      setThinkingContent('');
+
+      const documentId = createDocumentEntry({
+        prompt: trimmedPrompt,
+        title: initialDocumentTitle,
+        status: 'generating',
+      });
+      appendDocumentCardMessage(documentId);
+
+      if (appendConfigSnapshot) {
+        if (configSnapshot && (configSnapshot.memoryItems.length > 0 || configSnapshot.paramItems.length > 0)) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'user',
+              content: '',
+              variant: 'agent-config',
+              configSnapshot,
+            },
+          ]);
+        } else {
+          setMessages((prev) => [...prev, { role: 'user', content: '开始生成' }]);
+        }
+      }
+
+      const requestId = ++articleRequestSeqRef.current;
+
+      void (async () => {
+        try {
+          const streamResult = await streamAgent({
+            scenarioId: scenarioData.id,
+            query: trimmedPrompt,
+            inputs: agentInputs,
+            onWorkflowMessage: (payload) => {
+              if (requestId !== articleRequestSeqRef.current) {
+                return;
+              }
+
+              setMessages((prev) =>
+                appendMessage(prev, {
+                  id: payload.id || `workflow-message-${Date.now()}-${prev.length}`,
+                  role: 'ai',
+                  content: payload.content || '',
+                  variant: 'workflow-message',
+                  title: payload.title,
+                })
+              );
+            },
+            onResult: (text) => {
+              if (requestId !== articleRequestSeqRef.current) {
+                return;
+              }
+
+              const streamedTitle = extractFirstH1Title(text);
+              applyDocumentPatch(documentId, {
+                content: text,
+                ...(streamedTitle ? { title: streamedTitle } : {}),
+              });
+            },
+          });
+
+          if (requestId !== articleRequestSeqRef.current) {
+            return;
+          }
+
+          if (!streamResult.result.trim()) {
+            throw new Error('未获取到工作流结束节点内容。');
+          }
+
+          const finalTitle = extractFirstH1Title(streamResult.result);
+          applyDocumentPatch(documentId, {
+            content: streamResult.result,
+            title: finalTitle || initialDocumentTitle,
+            status: 'finished',
+            errorMessage: undefined,
+          });
+
+          setThinkingPhase(null);
+          setThinkingStatus('idle');
+          setThinkingContent('');
+          setIsGenerating(false);
+          setWritingState(WritingState.FINISHED);
+        } catch (error) {
+          if (requestId !== articleRequestSeqRef.current) {
+            return;
+          }
+
+          const messageText =
+            error instanceof Error ? error.message : '全文生成失败，请稍后重试。';
+          applyDocumentPatch(documentId, {
+            status: 'error',
+            errorMessage: messageText,
+          });
+          setThinkingPhase(null);
+          setThinkingStatus('error');
+          setThinkingContent(messageText);
+          setIsGenerating(false);
+          setWritingState(WritingState.INPUT);
+          setMessages((prev) => [...prev, { role: 'ai', content: `全文生成失败：${messageText}` }]);
+        }
+      })();
+    },
+    [
+      appendDocumentCardMessage,
+      buildAgentConfigSnapshot,
+      scenarioData,
+      paramsConfig,
+      extractFirstH1Title,
+      createDocumentEntry,
+      applyDocumentPatch,
+    ]
+  );
+
   const handleStartGenerate = useCallback(() => {
-    setWritingState(WritingState.GENERATING);
-    setIsGenerating(true);
-    setContent(''); // 重置内容
-    
-    // 记录配置信息到消息中
-    const configParts: string[] = [];
-    
-    // 如果有记忆配置，添加到消息中
-    if (Object.keys(memoryConfig).length > 0 && scenarioData?.agentConfig) {
-      const memoryText = scenarioData.agentConfig.memoryConfigs
-        .filter(config => memoryConfig[config.key])
-        .map(config => `${config.label}: ${memoryConfig[config.key]}`)
-        .join('\n');
-      if (memoryText) {
-        configParts.push(`记忆配置：\n${memoryText}`);
+    const promptText = (submittedPrompt.trim() || scenarioData?.suggestedQuestion || '').trim();
+    startAgentDocumentGeneration({
+      promptText,
+      appendConfigSnapshot: true,
+    });
+  }, [submittedPrompt, scenarioData, startAgentDocumentGeneration]);
+
+  const handleDocumentNameChange = useCallback(
+    (nextName: string) => {
+      setDocumentName(nextName);
+      if (activeDocumentIdRef.current) {
+        applyDocumentPatch(activeDocumentIdRef.current, {
+          title: nextName,
+        });
       }
-    }
-    
-    // 如果有参数配置，添加到消息中
-    if (Object.keys(paramsConfig).length > 0 && scenarioData?.agentConfig) {
-      const paramsText = scenarioData.agentConfig.paramConfigs
-        .filter(config => paramsConfig[config.key])
-        .map(config => `${config.label}: ${paramsConfig[config.key]}`)
-        .join('\n');
-      if (paramsText) {
-        configParts.push(`参数配置：\n${paramsText}`);
-      }
-    }
-    
-    // 添加配置消息（如果有）和开始生成消息
-    if (configParts.length > 0) {
-      setMessages(prev => [...prev, { 
-        role: 'user', 
-        content: configParts.join('\n\n') + '\n\n开始生成'
-      }]);
-    } else {
-      setMessages(prev => [...prev, { role: 'user', content: '开始生成' }]);
-    }
-    
-    // 如果场景数据中有fullText，提前提取标题
-    if (scenarioData?.generalData.fullText) {
-      const extractedTitle = extractFirstH1Title(scenarioData.generalData.fullText);
-      if (extractedTitle) {
-        setDocumentName(extractedTitle);
-      }
-    }
-  }, [scenarioData, memoryConfig, paramsConfig]);
+    },
+    [applyDocumentPatch]
+  );
 
   const handleSave = () => {
     console.log('保存文档:', { documentName, content });
-    // TODO: 实现保存逻辑
   };
 
   const handleRewriteRequest = useCallback(
@@ -416,13 +1630,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         expand: '扩写',
         custom: '自定义',
       };
-      const prompt =
-        type === 'custom' && customPrompt
-          ? customPrompt
-          : typeLabels[type];
+      const prompt = type === 'custom' && customPrompt ? customPrompt : typeLabels[type];
       const message = `对选中内容「${selectedText.slice(0, 30)}${selectedText.length > 30 ? '...' : ''}」进行${prompt}`;
-      setMessages(prev => [...prev, { role: 'user', content: message }]);
-      setInput(message);
+      setMessages((prev) => [...prev, { role: 'user', content: message }]);
 
       try {
         const result = await rewriteWithQwen({
@@ -430,11 +1640,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           type,
           customPrompt,
         });
-        setMessages(prev => [...prev, { role: 'ai', content: `已完成${prompt}。` }]);
+        setMessages((prev) => [...prev, { role: 'ai', content: `已完成${prompt}。` }]);
         return result;
       } catch (error) {
         const messageText = error instanceof Error ? error.message : '改写失败，请稍后重试。';
-        setMessages(prev => [...prev, { role: 'ai', content: `改写失败：${messageText}` }]);
+        setMessages((prev) => [...prev, { role: 'ai', content: `改写失败：${messageText}` }]);
         throw error;
       }
     },
@@ -443,19 +1653,15 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
 
   const handleDownload = () => {
     console.log('导出文档:', { documentName, content });
-    // TODO: 实现导出逻辑
   };
 
   const handleHistory = () => {
     console.log('查看历史编辑记录');
-    // TODO: 实现历史记录逻辑
   };
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
-      {/* Header */}
       <div className="h-14 bg-white border-b border-gray-200 flex items-center px-4">
-        {/* 返回按钮 */}
         <button
           onClick={handleBack}
           className="p-2 hover:bg-gray-100 rounded transition-colors mr-4"
@@ -464,27 +1670,22 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           <ArrowLeft className="w-5 h-5 text-gray-600" />
         </button>
 
-        {/* 智能体名称 */}
         <div className="flex-1">
           <select className="text-sm font-medium text-gray-700 bg-transparent border-none focus:outline-none cursor-pointer">
-            <option>{scenarioData?.agentConfig?.name || '通用写作智能体'}</option>
+            <option>{mode === Mode.GENERAL ? '通用写作智能体' : scenarioData?.agentConfig?.name || '通用写作智能体'}</option>
           </select>
         </div>
       </div>
 
-      {/* 主内容区域 */}
       <div className="flex-1 flex overflow-hidden">
-        {/* 左侧：编辑器（约2/3宽度） */}
         <div className="flex-[2] relative flex flex-col">
-          {/* 编辑器Header */}
           <div className="h-12 bg-white border-b border-gray-200 flex items-center px-4 gap-4">
-            {/* 文档命名 */}
             <div className="flex items-center gap-2 min-w-0" style={{ flex: '1 1 0%', maxWidth: 'none' }}>
               {isEditingName ? (
                 <input
                   type="text"
                   value={documentName}
-                  onChange={(e) => setDocumentName(e.target.value)}
+                  onChange={(e) => handleDocumentNameChange(e.target.value)}
                   onBlur={() => setIsEditingName(false)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
@@ -496,7 +1697,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                 />
               ) : (
                 <div className="flex items-center gap-2" style={{ minWidth: 0, flex: '1 1 0%', overflow: 'visible' }}>
-                  <span className="text-sm font-medium text-gray-700" style={{ whiteSpace: 'nowrap', overflow: 'visible' }}>{documentName}</span>
+                  <span className="text-sm font-medium text-gray-700" style={{ whiteSpace: 'nowrap', overflow: 'visible' }}>
+                    {documentName}
+                  </span>
                   <button
                     onClick={() => setIsEditingName(true)}
                     className="p-1 hover:bg-gray-100 rounded flex-shrink-0"
@@ -508,7 +1711,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
               )}
             </div>
 
-            {/* 右侧按钮组 */}
             <div className="flex items-center gap-2">
               <button
                 onClick={handleHistory}
@@ -532,29 +1734,46 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
             </div>
           </div>
 
-          {/* 编辑器内容 */}
           <div className="flex-1 overflow-hidden">
             <Editor
               content={content}
               writingState={writingState}
               onContentChange={(newContent) => {
+                if (pendingCopilotEdit) {
+                  setPendingCopilotEdit(null);
+                }
                 setContent(newContent);
+                if (activeDocumentIdRef.current) {
+                  applyDocumentPatch(activeDocumentIdRef.current, {
+                    content: newContent,
+                  });
+                }
               }}
               onRewriteRequest={handleRewriteRequest}
             />
           </div>
         </div>
 
-        {/* 右侧：Copilot 侧边栏（约1/3宽度） */}
         <div className="flex-1 border-l border-gray-200">
           <CopilotSidebar
             mode={mode}
             writingState={writingState}
             input={input}
+            initialPrompt={submittedPrompt}
             outline={outline}
+            documentTitle={documentName}
+            documents={documents}
+            activeDocumentId={activeDocumentId}
+            thinkingPhase={thinkingPhase}
+            thinkingStatus={thinkingStatus}
+            thinkingContent={thinkingContent}
             memoryConfig={memoryConfig}
             paramsConfig={paramsConfig}
             messages={messages}
+            pendingEdit={pendingCopilotEdit}
+            isApplyingPendingEdit={isApplyingPendingEdit || isCopilotResponding}
+            isCopilotResponding={isCopilotResponding}
+            copilotProgress={copilotProgress}
             onInputChange={setInput}
             onSend={handleSendQuery}
             onModeToggle={handleModeToggle}
@@ -568,7 +1787,15 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
               handleParamsConfigChange(config);
             }}
             onStartGenerate={handleStartGenerate}
+            onAcceptPendingEdit={handleAcceptPendingEdit}
+            onRejectPendingEdit={handleRejectPendingEdit}
             onMessagesChange={setMessages}
+            onConfirmAgentWrite={handleConfirmAgentWrite}
+            onCancelAgentWrite={handleCancelAgentWrite}
+            onDocumentSelect={selectDocument}
+            onDocumentDelete={deleteDocument}
+            mountedKnowledgeBaseIds={mountedKnowledgeBaseIds}
+            onMountedKnowledgeBaseChange={onMountedKnowledgeBaseChange}
           />
         </div>
       </div>

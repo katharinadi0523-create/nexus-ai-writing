@@ -55,8 +55,11 @@ export const ParamsModal: React.FC<ParamsModalProps> = ({
 
   const handleUpdate = () => {
     if (scenarioData) {
-      // 验证必填项（所有字段都视为必填，根据设计图都有红色星号）
+      // 仅校验显式标记为必填的参数项
       const missingFields = paramConfigs.filter((config) => {
+        if (config.required === false) {
+          return false;
+        }
         const value = values[config.key];
         return !value || (typeof value === 'string' && value.trim() === '');
       });
@@ -112,7 +115,7 @@ export const ParamsModal: React.FC<ParamsModalProps> = ({
               {paramConfigs.map((config) => (
                 <div key={config.key} className="space-y-2">
                   <label className="flex items-center gap-1 text-sm text-gray-700">
-                    <span className="text-red-500">*</span>
+                    {config.required === false ? null : <span className="text-red-500">*</span>}
                     <span>{config.label}</span>
                     {config.type === 'file' && (
                       <HelpCircle className="w-4 h-4 text-gray-400" />

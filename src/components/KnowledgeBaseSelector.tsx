@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { X, Search, RefreshCw, Plus, Eye, PlusCircle } from 'lucide-react';
-import { knowledgeBaseData } from '../constants/mockData';
+import React, { useEffect, useState } from 'react';
+import { X, Search, RefreshCw, Plus } from 'lucide-react';
+import { groupKnowledgeBasesBySource } from '../constants/knowledgeBases';
 
 interface KnowledgeBaseSelectorProps {
   isOpen: boolean;
@@ -9,158 +9,166 @@ interface KnowledgeBaseSelectorProps {
   initialSelectedIds?: string[];
 }
 
-type TabType = 'app-dev' | 'data-governance';
-
 export const KnowledgeBaseSelector: React.FC<KnowledgeBaseSelectorProps> = ({
   isOpen,
   onClose,
   onConfirm,
   initialSelectedIds = [],
 }) => {
-  const [activeTab, setActiveTab] = useState<TabType>('app-dev');
+  const knowledgeBaseGroups = groupKnowledgeBasesBySource();
+  const [activeTab, setActiveTab] = useState<string>(
+    knowledgeBaseGroups[0]?.sourceLabel || ''
+  );
   const [selectedIds, setSelectedIds] = useState<string[]>(initialSelectedIds);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // 当弹窗打开时，同步初始选择
   useEffect(() => {
     if (isOpen) {
       setSelectedIds(initialSelectedIds);
     }
   }, [isOpen, initialSelectedIds]);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (!knowledgeBaseGroups.some((group) => group.sourceLabel === activeTab)) {
+      setActiveTab(knowledgeBaseGroups[0]?.sourceLabel || '');
+    }
+  }, [activeTab, knowledgeBaseGroups]);
 
-  const currentData = activeTab === 'app-dev' 
-    ? knowledgeBaseData.appDevelopment 
-    : knowledgeBaseData.dataGovernance;
+  if (!isOpen) {
+    return null;
+  }
 
-  const filteredData = currentData.filter((kb) =>
-    kb.name.toLowerCase().includes(searchQuery.toLowerCase())
+  const currentData =
+    knowledgeBaseGroups.find((group) => group.sourceLabel === activeTab)?.items || [];
+
+  const filteredData = currentData.filter((knowledgeBase) =>
+    knowledgeBase.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleToggleSelect = (id: string) => {
+  const handleToggleSelect = (key: string) => {
     setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
     );
   };
 
   const handleConfirm = () => {
-    if (onConfirm) {
-      onConfirm(selectedIds);
-    }
+    onConfirm?.(selectedIds);
     onClose();
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-lg shadow-xl w-[800px] max-h-[80vh] flex flex-col">
-        {/* 头部 */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200">
+      <div className="flex max-h-[80vh] w-[800px] flex-col rounded-lg bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-gray-200 p-4">
           <h2 className="text-lg font-semibold text-gray-800">选择知识库</h2>
           <button
             onClick={onClose}
-            className="p-1 hover:bg-gray-100 rounded transition-colors"
+            className="rounded p-1 transition-colors hover:bg-gray-100"
           >
-            <X className="w-5 h-5 text-gray-500" />
+            <X className="h-5 w-5 text-gray-500" />
           </button>
         </div>
 
-        {/* Tab 切换 */}
-        <div className="flex border-b border-gray-200">
-          <button
-            onClick={() => {
-              setActiveTab('app-dev');
-              setSearchQuery('');
-            }}
-            className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
-              activeTab === 'app-dev'
-                ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
-                : 'text-gray-600 hover:text-gray-800'
-            }`}
-          >
-            应用开发—知识库
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('data-governance');
-              setSearchQuery('');
-            }}
-            className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
-              activeTab === 'data-governance'
-                ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
-                : 'text-gray-600 hover:text-gray-800'
-            }`}
-          >
-            多模态数据治理-数据集
-          </button>
-        </div>
+        {knowledgeBaseGroups.length > 1 ? (
+          <div className="flex border-b border-gray-200">
+            {knowledgeBaseGroups.map((group) => (
+              <button
+                key={group.sourceLabel}
+                onClick={() => {
+                  setActiveTab(group.sourceLabel);
+                  setSearchQuery('');
+                }}
+                className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
+                  activeTab === group.sourceLabel
+                    ? 'border-b-2 border-blue-600 bg-blue-50 text-blue-600'
+                    : 'text-gray-600 hover:text-gray-800'
+                }`}
+              >
+                {group.sourceLabel}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="border-b border-gray-200 px-4 py-3 text-sm font-medium text-gray-700">
+            {knowledgeBaseGroups[0]?.sourceLabel || '知识库'}
+          </div>
+        )}
 
-        {/* 搜索和操作栏 */}
-        <div className="p-4 border-b border-gray-200 flex items-center gap-2">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <div className="flex items-center gap-2 border-b border-gray-200 p-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="搜索知识库名称"
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-md border border-gray-300 py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          <button className="p-2 hover:bg-gray-100 rounded transition-colors">
-            <RefreshCw className="w-4 h-4 text-gray-600" />
+          <button className="rounded p-2 transition-colors hover:bg-gray-100">
+            <RefreshCw className="h-4 w-4 text-gray-600" />
           </button>
-          <button className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors flex items-center gap-2">
-            <Plus className="w-4 h-4" />
+          <button className="flex items-center gap-2 rounded-md bg-blue-500 px-4 py-2 text-white transition-colors hover:bg-blue-600">
+            <Plus className="h-4 w-4" />
             创建知识库
           </button>
         </div>
 
-        {/* 已选择提示 */}
-        <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
+        <div className="border-b border-gray-200 bg-gray-50 px-4 py-2">
           <span className="text-sm text-gray-600">已选择({selectedIds.length})</span>
         </div>
 
-        {/* 知识库列表 */}
         <div className="flex-1 overflow-y-auto p-4">
           <div className="space-y-3">
-            {filteredData.map((kb) => {
-              const isSelected = selectedIds.includes(kb.id);
+            {filteredData.map((knowledgeBase) => {
+              const isSelected = selectedIds.includes(knowledgeBase.key);
+              const itemCountText =
+                typeof knowledgeBase.itemCount === 'number'
+                  ? `${knowledgeBase.itemCount}个`
+                  : '真实知识库';
+              const sizeText = knowledgeBase.size || knowledgeBase.sourceLabel;
+
               return (
                 <div
-                  key={kb.id}
-                  className={`border rounded-lg p-4 transition-all ${
-                    isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+                  key={knowledgeBase.key}
+                  className={`rounded-lg border p-4 transition-all ${
+                    isSelected
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-200 hover:border-gray-300'
                   }`}
                 >
                   <div className="flex items-start gap-4">
-                    <div className="w-12 h-12 bg-blue-100 rounded flex items-center justify-center flex-shrink-0">
-                      <div className="w-6 h-6 bg-blue-500 rounded flex items-center justify-center">
-                        <span className="text-white text-xs">📄</span>
+                    <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded bg-blue-100">
+                      <div className="flex h-6 w-6 items-center justify-center rounded bg-blue-500">
+                        <span className="text-xs text-white">📄</span>
                       </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <h3 className="font-semibold text-gray-800 truncate">{kb.name}</h3>
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-1 flex items-center justify-between">
+                        <h3 className="truncate font-semibold text-gray-800">
+                          {knowledgeBase.name}
+                        </h3>
                       </div>
-                      <div className="flex items-center gap-4 text-sm text-gray-500 mb-2">
-                        <span>{kb.itemCount}个</span>
-                        <span>{kb.size}</span>
+                      <div className="mb-2 flex items-center gap-4 text-sm text-gray-500">
+                        <span>{itemCountText}</span>
+                        <span>{sizeText}</span>
                       </div>
-                      <p className="text-sm text-gray-600 line-clamp-2 mb-2">{kb.description}</p>
-                      <div className="text-xs text-gray-400">
-                        创建时间: {kb.createdAt}
-                      </div>
+                      <p className="mb-2 line-clamp-2 text-sm text-gray-600">
+                        {knowledgeBase.description}
+                      </p>
+                      {knowledgeBase.createdAt ? (
+                        <div className="text-xs text-gray-400">
+                          创建时间: {knowledgeBase.createdAt}
+                        </div>
+                      ) : null}
                     </div>
                     <div className="flex items-center gap-2">
-                      <button
-                        className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 transition-colors"
-                      >
+                      <button className="rounded border border-gray-300 px-3 py-1.5 text-sm transition-colors hover:bg-gray-50">
                         查看
                       </button>
                       <button
-                        onClick={() => handleToggleSelect(kb.id)}
-                        className={`px-3 py-1.5 text-sm rounded transition-colors ${
+                        onClick={() => handleToggleSelect(knowledgeBase.key)}
+                        className={`rounded px-3 py-1.5 text-sm transition-colors ${
                           isSelected
                             ? 'bg-blue-500 text-white hover:bg-blue-600'
                             : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
@@ -173,23 +181,28 @@ export const KnowledgeBaseSelector: React.FC<KnowledgeBaseSelectorProps> = ({
                 </div>
               );
             })}
+
+            {filteredData.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-gray-200 py-10 text-center text-sm text-gray-400">
+                未找到匹配的知识库
+              </div>
+            ) : null}
           </div>
         </div>
 
-        {/* 分页和确认按钮 */}
-        <div className="p-4 border-t border-gray-200">
-          <div className="flex items-center justify-between mb-3">
+        <div className="border-t border-gray-200 p-4">
+          <div className="mb-3 flex items-center justify-between">
             <div className="text-sm text-gray-600">共{filteredData.length}条</div>
             <div className="flex items-center gap-2">
               <button
                 onClick={onClose}
-                className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+                className="rounded border border-gray-300 px-4 py-2 text-sm transition-colors hover:bg-gray-50"
               >
                 取消
               </button>
               <button
                 onClick={handleConfirm}
-                className="px-4 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                className="rounded bg-blue-500 px-4 py-2 text-sm text-white transition-colors hover:bg-blue-600"
               >
                 确定
               </button>
@@ -197,27 +210,13 @@ export const KnowledgeBaseSelector: React.FC<KnowledgeBaseSelectorProps> = ({
           </div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <button className="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">
+              <button className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50">
                 &lt;
               </button>
-              <button className="px-3 py-1 bg-blue-500 text-white rounded">1</button>
-              <button className="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">2</button>
-              <button className="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">3</button>
-              <button className="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">4</button>
-              <button className="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">5</button>
-              <span className="px-2">...</span>
-              <button className="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">20</button>
-              <button className="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">
+              <button className="rounded bg-blue-500 px-3 py-1 text-white">1</button>
+              <button className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50">
                 &gt;
               </button>
-              <select className="px-2 py-1 border border-gray-300 rounded text-sm">
-                <option>10条/页</option>
-              </select>
-              <span className="text-sm text-gray-600">前往</span>
-              <input
-                type="text"
-                className="w-12 px-2 py-1 border border-gray-300 rounded text-sm"
-              />
             </div>
           </div>
         </div>
