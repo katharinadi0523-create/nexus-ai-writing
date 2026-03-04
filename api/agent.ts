@@ -1,10 +1,20 @@
-import { handleCors } from './cors';
-
 interface AgentBody {
   scenarioId?: string;
   query?: string;
   stream?: boolean;
   inputs?: Record<string, unknown>;
+}
+
+type CorsHandler = (req: any, res: any) => boolean;
+let corsHandlerPromise: Promise<CorsHandler> | null = null;
+
+async function loadCorsHandler(): Promise<CorsHandler> {
+  if (!corsHandlerPromise) {
+    corsHandlerPromise = import(new URL('./cors.js', import.meta.url).href)
+      .then((module) => module.handleCors as CorsHandler);
+  }
+
+  return corsHandlerPromise;
 }
 
 interface AppforgeEventEnvelope {
@@ -325,6 +335,14 @@ async function streamWorkflowAgentResponse({
 }
 
 export default async function handler(req: any, res: any) {
+  let handleCors: CorsHandler;
+  try {
+    handleCors = await loadCorsHandler();
+  } catch {
+    res.status(500).json({ error: '服务初始化失败（CORS 模块加载失败）' });
+    return;
+  }
+
   if (handleCors(req, res)) {
     return;
   }

@@ -1,5 +1,3 @@
-import { handleCors } from './cors';
-
 type RewriteType = 'continue' | 'polish' | 'expand' | 'custom';
 
 interface QwenChatResponse {
@@ -11,6 +9,18 @@ interface QwenChatResponse {
   error?: {
     message?: string;
   };
+}
+
+type CorsHandler = (req: any, res: any) => boolean;
+let corsHandlerPromise: Promise<CorsHandler> | null = null;
+
+async function loadCorsHandler(): Promise<CorsHandler> {
+  if (!corsHandlerPromise) {
+    corsHandlerPromise = import(new URL('./cors.js', import.meta.url).href)
+      .then((module) => module.handleCors as CorsHandler);
+  }
+
+  return corsHandlerPromise;
 }
 
 interface RewriteBody {
@@ -84,6 +94,14 @@ function getBody(rawBody: unknown): RewriteBody {
 }
 
 export default async function handler(req: any, res: any) {
+  let handleCors: CorsHandler;
+  try {
+    handleCors = await loadCorsHandler();
+  } catch {
+    res.status(500).json({ error: '服务初始化失败（CORS 模块加载失败）' });
+    return;
+  }
+
   if (handleCors(req, res)) {
     return;
   }

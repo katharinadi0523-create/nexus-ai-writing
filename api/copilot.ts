@@ -1,6 +1,3 @@
-import { handleCors } from './cors';
-import { getKnowledgeBaseContext } from './knowledge-base-service';
-
 interface QwenChatResponse {
   choices?: Array<{
     message?: {
@@ -56,6 +53,31 @@ interface CopilotBody {
     role?: 'user' | 'ai';
     content?: string;
   }>;
+}
+
+type CorsHandler = (req: any, res: any) => boolean;
+type KnowledgeBaseContextLoader = typeof import('./knowledge-base-service').getKnowledgeBaseContext;
+
+let corsHandlerPromise: Promise<CorsHandler> | null = null;
+let knowledgeBaseContextLoaderPromise: Promise<KnowledgeBaseContextLoader> | null = null;
+
+async function loadCorsHandler(): Promise<CorsHandler> {
+  if (!corsHandlerPromise) {
+    corsHandlerPromise = import(new URL('./cors.js', import.meta.url).href)
+      .then((module) => module.handleCors as CorsHandler);
+  }
+
+  return corsHandlerPromise;
+}
+
+async function loadKnowledgeBaseContextLoader(): Promise<KnowledgeBaseContextLoader> {
+  if (!knowledgeBaseContextLoaderPromise) {
+    knowledgeBaseContextLoaderPromise = import(
+      new URL('./knowledge-base-service.js', import.meta.url).href
+    ).then((module) => module.getKnowledgeBaseContext as KnowledgeBaseContextLoader);
+  }
+
+  return knowledgeBaseContextLoaderPromise;
 }
 
 interface DocumentSection {
@@ -1036,6 +1058,18 @@ function sanitizeRewriteSection(text: string): string {
 }
 
 export default async function handler(req: any, res: any) {
+  let handleCors: CorsHandler;
+  let getKnowledgeBaseContext: KnowledgeBaseContextLoader;
+  try {
+    [handleCors, getKnowledgeBaseContext] = await Promise.all([
+      loadCorsHandler(),
+      loadKnowledgeBaseContextLoader(),
+    ]);
+  } catch {
+    res.status(500).json({ error: '服务初始化失败（模块加载失败）' });
+    return;
+  }
+
   if (handleCors(req, res)) {
     return;
   }
