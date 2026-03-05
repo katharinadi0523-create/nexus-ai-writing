@@ -69,6 +69,15 @@ const AGENT_REGISTRY: Record<string, AgentDefinition> = {
 };
 
 const MESSAGE_OUTPUT_KEYS = ['message', 'msg-output', 'msg_output', 'msgOutput', 'reply'];
+const MESSAGE_NODE_TYPES = new Set([
+  'msg-output',
+  'msg_output',
+  'msgoutput',
+  'message',
+  'message-output',
+  'message_output',
+  'messageoutput',
+]);
 const FINAL_OUTPUT_KEYS = [
   'report',
   'result',
@@ -226,8 +235,14 @@ async function sendAgentFallback({
   });
 
   if (fallbackResult.trim()) {
+    const fallbackNotice = `真实工作流暂不可用，已切换为简化生成（原因：${reason || '上游不可达'}）。当前不会返回节点级 msg-output。`;
     writeSseEvent(res, 'status', {
       status: '真实智能体暂不可用，已自动切换为通用生成',
+    });
+    writeSseEvent(res, 'workflow_message', {
+      id: `workflow-fallback-${Date.now()}`,
+      title: '工作流状态',
+      content: fallbackNotice.slice(0, 260),
     });
     writeSseEvent(res, 'done', { result: fallbackResult });
   } else {
@@ -291,6 +306,9 @@ function getStringValue(value: unknown): string {
   if (typeof value === 'string') {
     return value;
   }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
   return '';
 }
 
@@ -302,7 +320,49 @@ function getRecordValue(value: unknown): Record<string, unknown> | undefined {
 }
 
 function extractNodeOutputs(data: Record<string, unknown> | undefined): Record<string, unknown> {
-  return getRecordValue(data?.outputs) || {};
+  return getRecordValue(data?.outputs) || getRecordValue(data?.output) || {};
+}
+
+function normalizeNodeType(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, '').replace(/_/g, '-');
+}
+
+function extractTextFromValue(value: unknown): string {
+  const directText = getStringValue(value).trim();
+  if (directText) {
+    return directText;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const text = extractTextFromValue(item);
+      if (text) {
+        return text;
+      }
+    }
+    return '';
+  }
+
+  const record = getRecordValue(value);
+  if (!record) {
+    return '';
+  }
+
+  for (const key of MESSAGE_OUTPUT_KEYS) {
+    const text = extractTextFromValue(record[key]);
+    if (text) {
+      return text;
+    }
+  }
+
+  for (const key of ['text', 'content', 'value', 'result', 'answer']) {
+    const text = extractTextFromValue(record[key]);
+    if (text) {
+      return text;
+    }
+  }
+
+  return '';
 }
 
 function extractPreferredOutput(
@@ -314,14 +374,14 @@ function extractPreferredOutput(
   }
 
   for (const key of preferredKeys) {
-    const value = getStringValue(outputs[key]);
+    const value = extractTextFromValue(outputs[key]);
     if (value.trim()) {
       return value;
     }
   }
 
   for (const value of Object.values(outputs)) {
-    const text = getStringValue(value);
+    const text = extractTextFromValue(value);
     if (text.trim()) {
       return text;
     }
@@ -408,10 +468,10 @@ async function streamWorkflowAgentResponse({
       return;
     }
 
-    if (eventName === 'node_finished') {
-      const nodeType = getStringValue(data?.node_type);
+    if (eventName === 'node_finished' || eventName === 'node_completed') {
+      const nodeType = normalizeNodeType(getStringValue(data?.node_type));
 
-      if (nodeType === 'msg-output') {
+      if (MESSAGE_NODE_TYPES.has(nodeType)) {
         emitWorkflowMessage(data);
         return;
       }
@@ -423,7 +483,7 @@ async function streamWorkflowAgentResponse({
       return;
     }
 
-    if (eventName === 'workflow_finished') {
+    if (eventName === 'workflow_finished' || eventName === 'workflow_completed') {
       hasWorkflowFinished = true;
       const outputs = extractNodeOutputs(data);
       cacheFinalResult(extractPreferredOutput(outputs, FINAL_OUTPUT_KEYS));

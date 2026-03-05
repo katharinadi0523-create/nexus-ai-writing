@@ -231,10 +231,15 @@ const EDIT_TARGET_PATTERN =
 const RESTART_INTENT_PATTERN =
   /(再写一篇|重写一篇|重新写|重新生成|重新来|另写一篇|换个主题|换一篇|新写一篇|再来一篇|重新开始写|重新开始生成|重新起草|再生成一篇|写一篇新的)/;
 
+const DOCUMENT_QA_HINT_PATTERN =
+  /(根据原文|根据文章|根据文档|文中|原文中|文章里|文档里|这篇|这段|这一段|该段|段落|章节|上文|前文|全文|本文|本段|报告中|项目中)/;
+
 const QA_INTENT_PATTERN =
-  /[?？]|为什么|为何|原因|哪些|哪里|如何|怎么|是否|是不是|有无|多少|总结|概括|解释|根据原文|根据文章|根据文档|文中|原文中|文章里|文档里/;
+  /[?？]|为什么|为何|原因|哪些|哪里|如何|怎么|是否|是不是|有无|多少|总结|概括|解释/;
 
 const CHAT_INTENT_PATTERN = /(你好|在吗|谢谢|辛苦|收到|明白|好的|ok|可以|哈哈|聊聊|随便聊)/i;
+const CHAT_FAST_TRACK_PATTERN =
+  /^(你好|在吗|谢谢|辛苦了?|收到|明白|好的|ok|可以|哈哈|聊聊|随便聊|你知道|你了解|你听说过|介绍一下|讲讲|你怎么看|你觉得)/i;
 
 const COPILOT_PROGRESS_PLAN: Record<
   CopilotProgressIntent,
@@ -284,6 +289,27 @@ const isLikelyEditIntent = (query: string): boolean => {
   );
 };
 
+const isLikelyLightweightChat = (query: string): boolean => {
+  const normalized = query.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  if (isLikelyEditIntent(normalized) || RESTART_INTENT_PATTERN.test(normalized)) {
+    return false;
+  }
+
+  if (DOCUMENT_QA_HINT_PATTERN.test(normalized)) {
+    return false;
+  }
+
+  if (CHAT_INTENT_PATTERN.test(normalized) || CHAT_FAST_TRACK_PATTERN.test(normalized)) {
+    return true;
+  }
+
+  return /^(嗯|嗯嗯|好|好的|收到|明白了|辛苦了?|谢谢(你)?|thx|thanks)[!！。,. ]*$/i.test(normalized);
+};
+
 const predictCopilotIntent = (query: string): CopilotProgressIntent => {
   const normalized = query.trim();
   if (!normalized) {
@@ -298,12 +324,12 @@ const predictCopilotIntent = (query: string): CopilotProgressIntent => {
     return 'restart';
   }
 
-  if (QA_INTENT_PATTERN.test(normalized)) {
-    return 'qa';
+  if (isLikelyLightweightChat(normalized)) {
+    return 'chat';
   }
 
-  if (CHAT_INTENT_PATTERN.test(normalized)) {
-    return 'chat';
+  if (DOCUMENT_QA_HINT_PATTERN.test(normalized) || QA_INTENT_PATTERN.test(normalized)) {
+    return 'qa';
   }
 
   return 'unknown';
@@ -958,18 +984,20 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
 
       setPendingCopilotEdit(null);
       setIsCopilotResponding(true);
-      startCopilotProgress(trimmedQuery);
+      const predictedIntent = startCopilotProgress(trimmedQuery);
+      const useLightweightChat = predictedIntent === 'chat';
       let startedNewWritingFlow = false;
 
       try {
         const result = await queryCopilotWithQwen({
           message: trimmedQuery,
-          document: content,
-          outline,
+          document: useLightweightChat ? '' : content,
+          outline: useLightweightChat ? '' : outline,
           title: documentName,
-          history: serializeChatHistory(messages),
+          history: useLightweightChat ? [] : serializeChatHistory(messages),
           mode: 'general',
-          knowledgeBaseIds: mountedKnowledgeBaseIds,
+          knowledgeBaseIds: useLightweightChat ? [] : mountedKnowledgeBaseIds,
+          lightweightChat: useLightweightChat,
         });
 
         if (result.intent === 'restart') {
@@ -1071,21 +1099,23 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
 
     setPendingCopilotEdit(null);
     setIsCopilotResponding(true);
-    startCopilotProgress(trimmedQuery);
+    const predictedIntent = startCopilotProgress(trimmedQuery);
+    const useLightweightChat = predictedIntent === 'chat';
     let startedNewWritingFlow = false;
 
     try {
       const result = await queryCopilotWithQwen({
         message: trimmedQuery,
-        document: content,
-        outline,
+        document: useLightweightChat ? '' : content,
+        outline: useLightweightChat ? '' : outline,
         title: documentName,
-        history: serializeChatHistory(messages),
+        history: useLightweightChat ? [] : serializeChatHistory(messages),
         mode: 'agent',
         agentContext: {
           agentName: scenarioData.agentConfig.name,
           agentDescription: scenarioData.agentConfig.description,
         },
+        lightweightChat: useLightweightChat,
       });
 
       if (result.intent === 'agent_write_related' || result.intent === 'restart') {
@@ -1525,7 +1555,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
 
               setMessages((prev) =>
                 appendMessage(prev, {
-                  id: payload.id || `workflow-message-${Date.now()}-${prev.length}`,
+                  id: `${requestId}:${payload.id || `workflow-message-${Date.now()}-${prev.length}`}`,
                   role: 'ai',
                   content: payload.content || '',
                   variant: 'workflow-message',

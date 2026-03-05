@@ -13,13 +13,14 @@ interface AgentCopilotContext {
 
 interface CopilotRequest {
   message: string;
-  document: string;
+  document?: string;
   outline?: string;
   title?: string;
   history?: SerializableMessage[];
   mode?: 'general' | 'agent';
   agentContext?: AgentCopilotContext;
   knowledgeBaseIds?: string[];
+  lightweightChat?: boolean;
 }
 
 async function parseApiResponse(response: Response): Promise<{
@@ -56,6 +57,7 @@ export async function queryCopilotWithQwen({
   mode,
   agentContext,
   knowledgeBaseIds,
+  lightweightChat,
 }: CopilotRequest): Promise<CopilotResponse> {
   const response = await fetchApi('/api/copilot', {
     method: 'POST',
@@ -71,6 +73,7 @@ export async function queryCopilotWithQwen({
       mode,
       agentContext,
       knowledgeBaseIds,
+      lightweightChat,
     }),
   });
 
