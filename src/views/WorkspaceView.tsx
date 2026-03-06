@@ -11,13 +11,14 @@ import { mockDataStore, ScenarioId, setActiveScenarioId } from '../constants/moc
 import { Editor } from '../components/Editor';
 import type { RewriteType } from '../components/RewriteWindow';
 import { CopilotSidebar } from '../components/CopilotSidebar';
-import { ArrowLeft, Clock, Edit2 } from 'lucide-react';
+import { ArrowLeft, Edit2 } from 'lucide-react';
 import { getTask, updateTask } from '../utils/taskStore';
 import type { Task } from '../utils/taskStore';
 import { streamAgent } from '../services/agentClient';
 import { queryCopilotWithQwen } from '../services/copilotClient';
 import { rewriteWithQwen } from '../services/qwenClient';
 import { generateOutlineWithQwen, streamArticleWithQwen, streamThoughtWithQwen } from '../services/writingClient';
+import { exportDocument, type ExportFormat } from '../services/exportService';
 import type {
   AgentConfigSnapshot,
   AgentWriteConfirmation,
@@ -230,6 +231,8 @@ const EDIT_TARGET_PATTERN =
 
 const RESTART_INTENT_PATTERN =
   /(再写一篇|重写一篇|重新写|重新生成|重新来|另写一篇|换个主题|换一篇|新写一篇|再来一篇|重新开始写|重新开始生成|重新起草|再生成一篇|写一篇新的)/;
+const NEW_DOCUMENT_COMMAND_PATTERN =
+  /^(?:请|帮我|请你|麻烦(?:你)?|可以)?\s*(?:再|重新|另)?\s*(?:写|生成|起草|输出)\s*(?:一篇|一份)/;
 
 const DOCUMENT_QA_HINT_PATTERN =
   /(根据原文|根据文章|根据文档|文中|原文中|文章里|文档里|这篇|这段|这一段|该段|段落|章节|上文|前文|全文|本文|本段|报告中|项目中)/;
@@ -289,13 +292,34 @@ const isLikelyEditIntent = (query: string): boolean => {
   );
 };
 
+const isLikelyRestartIntent = (query: string): boolean => {
+  const normalized = query.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  if (isLikelyEditIntent(normalized)) {
+    return false;
+  }
+
+  if (RESTART_INTENT_PATTERN.test(normalized)) {
+    return true;
+  }
+
+  if (!NEW_DOCUMENT_COMMAND_PATTERN.test(normalized)) {
+    return false;
+  }
+
+  return !EDIT_TARGET_PATTERN.test(normalized);
+};
+
 const isLikelyLightweightChat = (query: string): boolean => {
   const normalized = query.trim();
   if (!normalized) {
     return false;
   }
 
-  if (isLikelyEditIntent(normalized) || RESTART_INTENT_PATTERN.test(normalized)) {
+  if (isLikelyEditIntent(normalized) || isLikelyRestartIntent(normalized)) {
     return false;
   }
 
@@ -320,7 +344,7 @@ const predictCopilotIntent = (query: string): CopilotProgressIntent => {
     return 'edit';
   }
 
-  if (RESTART_INTENT_PATTERN.test(normalized)) {
+  if (isLikelyRestartIntent(normalized)) {
     return 'restart';
   }
 
@@ -415,6 +439,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     initialActiveDocument?.title ?? initialTask?.documentName ?? '新文档_1'
   );
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState<boolean>(false);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
   const [messages, setMessages] = useState<ChatMessage[]>(
     (initialTask?.messages ?? []).map((m) => ({
       role: m.role,
@@ -437,8 +463,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const articleStreamRef = useRef(0);
   const thinkingRequestSeqRef = useRef(0);
   const copilotProgressTimerRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
 
   const scenarioData = currentScenarioId ? mockDataStore[currentScenarioId] || null : null;
+  const activeDocument =
+    documents.find((document) => document.id === activeDocumentId) || null;
+  const canExport =
+    activeDocument?.status === 'finished' && content.trim().length > 0;
 
   const loadDocumentIntoEditor = useCallback((document: WritingDocument | null) => {
     setContent(document?.content || '');
@@ -746,6 +777,30 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       setActiveScenarioId(currentScenarioId);
     }
   }, [currentScenarioId]);
+
+  useEffect(() => {
+    if (!canExport) {
+      setIsExportMenuOpen(false);
+    }
+  }, [canExport]);
+
+  useEffect(() => {
+    if (!isExportMenuOpen) {
+      return;
+    }
+
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (exportMenuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setIsExportMenuOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, [isExportMenuOpen]);
 
   useEffect(() => {
     activeDocumentIdRef.current = activeDocumentId;
@@ -1648,10 +1703,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     [applyDocumentPatch]
   );
 
-  const handleSave = () => {
-    console.log('保存文档:', { documentName, content });
-  };
-
   const handleRewriteRequest = useCallback(
     async (selectedText: string, type: RewriteType, customPrompt?: string): Promise<string> => {
       const typeLabels: Record<RewriteType, string> = {
@@ -1681,13 +1732,36 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     []
   );
 
-  const handleDownload = () => {
-    console.log('导出文档:', { documentName, content });
-  };
+  const handleExport = useCallback(
+    async (format: ExportFormat) => {
+      if (!canExport || isExporting) {
+        return;
+      }
 
-  const handleHistory = () => {
-    console.log('查看历史编辑记录');
-  };
+      setIsExportMenuOpen(false);
+      setIsExporting(true);
+
+      const formatLabel = format === 'word' ? 'Word' : 'PDF';
+      const fallbackTitle = documentName.trim() || '文档';
+
+      try {
+        await exportDocument(
+          {
+            title: fallbackTitle,
+            markdown: content,
+          },
+          format
+        );
+        setMessages((prev) => [...prev, { role: 'ai', content: `已导出 ${formatLabel} 文件。` }]);
+      } catch (error) {
+        const messageText = error instanceof Error ? error.message : '导出失败，请稍后重试。';
+        setMessages((prev) => [...prev, { role: 'ai', content: `导出失败：${messageText}` }]);
+      } finally {
+        setIsExporting(false);
+      }
+    },
+    [canExport, content, documentName, isExporting]
+  );
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
@@ -1742,25 +1816,41 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                onClick={handleHistory}
-                className="p-2 hover:bg-gray-100 rounded transition-colors"
-                title="历史编辑记录"
-              >
-                <Clock className="w-4 h-4 text-gray-600" />
-              </button>
-              <button
-                onClick={handleSave}
-                className="px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100 rounded transition-colors"
-              >
-                保存
-              </button>
-              <button
-                onClick={handleDownload}
-                className="px-3 py-1.5 text-sm bg-blue-500 text-white hover:bg-blue-600 rounded transition-colors"
-              >
-                下载
-              </button>
+              <div className="relative" ref={exportMenuRef}>
+                <button
+                  onClick={() => {
+                    if (!canExport || isExporting) {
+                      return;
+                    }
+                    setIsExportMenuOpen((prev) => !prev);
+                  }}
+                  disabled={!canExport || isExporting}
+                  className={`px-3 py-1.5 text-sm rounded transition-colors ${
+                    canExport && !isExporting
+                      ? 'bg-blue-500 text-white hover:bg-blue-600'
+                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  {isExporting ? '导出中...' : '导出'}
+                </button>
+
+                {isExportMenuOpen && canExport && !isExporting ? (
+                  <div className="absolute right-0 mt-2 w-40 bg-white border border-gray-200 rounded shadow-lg z-20 py-1">
+                    <button
+                      onClick={() => void handleExport('word')}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      导出为 Word
+                    </button>
+                    <button
+                      onClick={() => void handleExport('pdf')}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      导出为 PDF
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
 

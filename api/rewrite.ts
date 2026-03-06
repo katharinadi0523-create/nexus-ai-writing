@@ -40,7 +40,7 @@ interface RewriteBody {
 
 const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const DEFAULT_MODEL = 'qwen-plus';
-const DEFAULT_QWEN_TIMEOUT_MS = 32000;
+const DEFAULT_QWEN_TIMEOUT_MS = 120000;
 
 function isHeadingLine(text: string): boolean {
   const line = text.trim();

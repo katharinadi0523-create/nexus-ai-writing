@@ -50,7 +50,10 @@ function handleCors(req: any, res: any): boolean {
 
 const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const DEFAULT_MODEL = 'qwen-plus';
-const DEFAULT_QWEN_TIMEOUT_MS = 55000;
+const DEFAULT_QWEN_TIMEOUT_MS = 180000;
+const OUTLINE_KB_TOTAL_TOP_K = 3;
+const OUTLINE_KB_MAX_CONTEXT_CHARS = 3000;
+const OUTLINE_KB_MAX_CHUNK_CHARS = 700;
 
 function extractContent(data: QwenChatResponse): string {
   const content = data.choices?.[0]?.message?.content;
@@ -310,6 +313,47 @@ async function fetchWithTimeout(
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function requestQwenChatCompletion({
+  baseUrl,
+  apiKey,
+  model,
+  messages,
+  action,
+  shouldStream,
+  timeoutMs,
+}: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  messages: Array<{ role: string; content: string }>;
+  action: WriteAction;
+  shouldStream: boolean;
+  timeoutMs: number;
+}): Promise<Response> {
+  return fetchWithTimeout(
+    `${baseUrl}/chat/completions`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: action === 'outline' ? 0.5 : action === 'thought' ? 0.6 : 0.7,
+        stream: shouldStream,
+        ...(action === 'article'
+          ? {
+              enable_thinking: true,
+            }
+          : {}),
+      }),
+    },
+    timeoutMs
+  );
 }
 
 function writeSseEvent(res: any, event: string, payload: unknown) {
@@ -612,6 +656,13 @@ export default async function handler(req: any, res: any) {
         knowledgeBaseContext = await getKnowledgeBaseContext({
           knowledgeBaseKeys: knowledgeBaseIds,
           query: prompt,
+          ...(action === 'outline'
+            ? {
+                totalTopKOverride: OUTLINE_KB_TOTAL_TOP_K,
+                maxContextCharsOverride: OUTLINE_KB_MAX_CONTEXT_CHARS,
+                maxChunkCharsOverride: OUTLINE_KB_MAX_CHUNK_CHARS,
+              }
+            : {}),
         });
       } catch (knowledgeBaseError) {
         const message =
@@ -632,34 +683,46 @@ export default async function handler(req: any, res: any) {
 
     let response: Response;
     try {
-      response = await fetchWithTimeout(
-        `${baseUrl}/chat/completions`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            messages,
-            temperature: action === 'outline' ? 0.5 : action === 'thought' ? 0.6 : 0.7,
-            stream: shouldStream,
-            ...(action === 'article'
-              ? {
-                  enable_thinking: true,
-                }
-              : {}),
-          }),
-        },
-        timeoutMs
-      );
+      response = await requestQwenChatCompletion({
+        baseUrl,
+        apiKey,
+        model,
+        messages,
+        action,
+        shouldStream,
+        timeoutMs,
+      });
     } catch (error) {
       if (isAbortError(error)) {
-        res.status(504).json({ error: `上游模型服务超时（>${timeoutMs}ms）` });
-        return;
+        if (action === 'outline' && knowledgeBaseContext.contextText.trim()) {
+          try {
+            console.warn(
+              '[write] outline request timed out with knowledge-base context, retrying without context'
+            );
+            const fallbackMessages = getMessages(action, prompt, outline, phase, '');
+            response = await requestQwenChatCompletion({
+              baseUrl,
+              apiKey,
+              model,
+              messages: fallbackMessages,
+              action,
+              shouldStream,
+              timeoutMs,
+            });
+          } catch (fallbackError) {
+            if (isAbortError(fallbackError)) {
+              res.status(504).json({ error: `上游模型服务超时（>${timeoutMs}ms）` });
+              return;
+            }
+            throw fallbackError;
+          }
+        } else {
+          res.status(504).json({ error: `上游模型服务超时（>${timeoutMs}ms）` });
+          return;
+        }
+      } else {
+        throw error;
       }
-      throw error;
     }
 
     if (!response.ok) {

@@ -69,7 +69,7 @@ interface CopilotSidebarProps {
   className?: string;
 }
 
-type TabType = 'chat' | 'doc' | 'kb';
+type TabType = 'chat' | 'doc';
 
 function getCopilotProgressCopy(
   progress: CopilotProgressState,
@@ -773,16 +773,6 @@ export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
         >
           文档
         </button>
-        <button
-          onClick={() => setActiveTab('kb')}
-          className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
-            activeTab === 'kb'
-              ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
-              : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-          }`}
-        >
-          知识
-        </button>
       </div>
 
       {activeTab === 'chat' && renderChatContent()}
@@ -805,12 +795,6 @@ export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
           )}
         </div>
       )}
-      {activeTab === 'kb' && (
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="mt-8 text-center text-gray-500">知识库</div>
-        </div>
-      )}
-
       {activeTab === 'chat' && (
         <div className="border-t border-gray-200">
           <InputArea

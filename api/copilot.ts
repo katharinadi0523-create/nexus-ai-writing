@@ -88,11 +88,17 @@ const DEFAULT_ROUTE_MODEL = 'qwen-turbo';
 const DEFAULT_ROUTE_REPLY = '我先判断一下你的意图。';
 const DEFAULT_RESTART_REPLY = '可以，我会按这个新主题重新开始生成。';
 const DEFAULT_AGENT_RELATED_REPLY = '我将使用当前智能体继续生成这个主题。';
-const DEFAULT_ROUTE_TIMEOUT_MS = 10000;
-const DEFAULT_EXECUTION_TIMEOUT_MS = 32000;
-const DEFAULT_EDIT_TIMEOUT_MS = 48000;
+const DEFAULT_ROUTE_TIMEOUT_MS = 20000;
+const DEFAULT_EXECUTION_TIMEOUT_MS = 120000;
+const DEFAULT_EDIT_TIMEOUT_MS = 180000;
 const EDIT_INTENT_REGEX =
   /(改写|修改|润色|扩写|扩充|精简|缩写|补充|补写|完善|优化|调整|重写|改成|改为|删除|增加|替换|续写|补全|改动)/;
+const RESTART_INTENT_REGEX =
+  /(再写一篇|再来一篇|重写一篇|重新写一篇|重新生成一篇|另写一篇|换个主题|换一篇|新写一篇|写一篇新的|再生成一篇|重新开始写一篇)/;
+const NEW_DOCUMENT_WRITE_COMMAND_REGEX =
+  /^(?:请|帮我|请你|麻烦(?:你)?|可以)?\s*(?:再|重新|另)?\s*(?:写|生成|起草|输出)\s*(?:一篇|一份)/;
+const DOCUMENT_EDIT_HINT_REGEX =
+  /(这段|这一段|段落|章节|小节|这部分|原文|上文|前文|本文|文中|这个部分|该段|改写|润色|扩写|补充|修改)/;
 
 function getKnowledgeBaseBudgetByIntent(intent: CopilotIntent): {
   totalTopK: number;
@@ -177,10 +183,53 @@ function extractAgentWriteTopic(message: string): string {
   return message
     .replace(/^[，。！？\s]+/g, '')
     .replace(/^(请|帮我|麻烦|请你|帮忙)?\s*/g, '')
+    .replace(
+      /^(再写一篇|再来一篇|重写一篇|重新写一篇|重新生成一篇|另写一篇|换个主题|换一篇|新写一篇|写一篇新的|再生成一篇|重新开始写一篇)\s*/g,
+      ''
+    )
+    .replace(/^(再|重新|另)\s*/g, '')
     .replace(/^(使用|用)?\s*(当前|这个)?\s*智能体\s*/g, '')
     .replace(/^(继续)?\s*(写|生成|起草|输出)\s*/g, '')
     .replace(/^(一篇|一份|一段)\s*/g, '')
     .trim();
+}
+
+function detectForcedWriteDecision({
+  message,
+  mode,
+}: {
+  message: string;
+  mode: 'general' | 'agent';
+}): RouteDecision | null {
+  const normalizedMessage = message.trim();
+  if (!normalizedMessage) {
+    return null;
+  }
+
+  const hasRestartSignal = RESTART_INTENT_REGEX.test(normalizedMessage);
+  const hasNewDocumentCommand = NEW_DOCUMENT_WRITE_COMMAND_REGEX.test(normalizedMessage);
+  if (!hasRestartSignal && !hasNewDocumentCommand) {
+    return null;
+  }
+
+  if (!hasRestartSignal && DOCUMENT_EDIT_HINT_REGEX.test(normalizedMessage)) {
+    return null;
+  }
+
+  const topic = extractAgentWriteTopic(normalizedMessage) || normalizedMessage;
+  if (mode === 'agent') {
+    return {
+      intent: 'agent_write_related',
+      reply: DEFAULT_AGENT_RELATED_REPLY,
+      topic,
+    };
+  }
+
+  return {
+    intent: 'restart',
+    reply: DEFAULT_RESTART_REPLY,
+    topic,
+  };
 }
 
 function buildFallbackRouteDecision({
@@ -194,15 +243,12 @@ function buildFallbackRouteDecision({
 }): RouteDecision {
   const normalizedMessage = message.trim();
 
-  if (/重新|重来|另写|换个主题|换一篇|新写/.test(normalizedMessage)) {
-    const topic = normalizedMessage
-      .replace(/重新|重来|另写|换个主题|换一篇|新写/g, '')
-      .trim();
-    return {
-      intent: 'restart',
-      reply: DEFAULT_RESTART_REPLY,
-      topic: topic || normalizedMessage,
-    };
+  const forcedWriteDecision = detectForcedWriteDecision({
+    message: normalizedMessage,
+    mode,
+  });
+  if (forcedWriteDecision) {
+    return forcedWriteDecision;
   }
 
   if (looksLikeEditIntent(normalizedMessage)) {
@@ -898,6 +944,90 @@ function findExplicitSectionMatch(document: string, query: string): DocumentSect
   return best.section;
 }
 
+function findFallbackSectionMatch(document: string, query: string): DocumentSection | null {
+  const sections = splitDocumentIntoSections(document);
+  if (sections.length === 0) {
+    return null;
+  }
+
+  const tokens = extractSearchTokens(query)
+    .map((token) => token.toLowerCase())
+    .filter((token) => token.length >= 2)
+    .slice(0, 20);
+
+  const scored = sections
+    .map((section, index) => {
+      const titleScore = scoreSectionTitleMatch(query, section);
+      const haystack = `${section.path}\n${section.text}`.toLowerCase();
+      const pathHaystack = section.path.toLowerCase();
+      let tokenScore = 0;
+
+      for (const token of tokens) {
+        const occurrences = countOccurrences(haystack, token);
+        if (occurrences === 0) {
+          continue;
+        }
+
+        tokenScore += Math.min(occurrences, 6);
+        tokenScore += countOccurrences(pathHaystack, token) * 2;
+      }
+
+      return {
+        index,
+        section,
+        score: titleScore + tokenScore,
+      };
+    })
+    .sort((left, right) => {
+      if (right.score === left.score) {
+        return left.index - right.index;
+      }
+      return right.score - left.score;
+    });
+
+  const best = scored[0];
+  const second = scored[1];
+  if (!best || best.score < 6) {
+    return null;
+  }
+
+  if (second && best.score < 12 && best.score - second.score < 2) {
+    return null;
+  }
+
+  return best.section;
+}
+
+function buildEditFallbackResponse({
+  document,
+  message,
+}: {
+  document: string;
+  message: string;
+}): CopilotResponse {
+  const fallbackSection = findFallbackSectionMatch(document, message);
+  if (!fallbackSection) {
+    return {
+      intent: 'edit',
+      reply: '模型响应较慢，暂时不能稳定定位到唯一段落。请补充章节名或贴出原句，我会立刻改写。',
+      edit: {
+        status: 'needs_clarification',
+      },
+    };
+  }
+
+  return {
+    intent: 'edit',
+    reply: '模型响应较慢，我先基于最匹配段落生成一版快速改写稿，请确认是否接受这次修改。',
+    edit: {
+      status: 'ready',
+      sectionTitle: fallbackSection.title,
+      targetText: fallbackSection.text,
+      replacementText: buildDeterministicRewriteFallback(fallbackSection.text, message),
+    },
+  };
+}
+
 function buildGeneralRouteMessages({
   message,
   title,
@@ -1292,6 +1422,15 @@ export default async function handler(req: any, res: any) {
   );
 
   try {
+    const forcedWriteDecision = detectForcedWriteDecision({
+      message,
+      mode,
+    });
+    if (forcedWriteDecision) {
+      res.status(200).json(forcedWriteDecision);
+      return;
+    }
+
     if (lightweightChat) {
       const chatOutput = await requestModelOutput({
         baseUrl,
@@ -1383,34 +1522,41 @@ export default async function handler(req: any, res: any) {
       const directRelevantContext = selectRelevantContext(
         document,
         `${message}\n${title}\n${outline}`,
-        3,
-        3600,
-        1400
+        2,
+        2200,
+        900
       );
-      const directEditOutput = await requestModelOutput({
-        baseUrl,
-        apiKey,
-        model: executionModel,
-        messages: buildEditExecutionMessages({
-          message,
-          title,
-          structureSummary,
-          context: directRelevantContext,
-          knowledgeBaseContext: directKnowledgeBaseContext.contextText,
-        }),
-        temperature: 0.2,
-        timeoutMs: editTimeoutMs,
-        stageName: '改写执行',
-        maxTokens: 520,
-      });
+      try {
+        const directEditOutput = await requestModelOutput({
+          baseUrl,
+          apiKey,
+          model: executionModel,
+          messages: buildEditExecutionMessages({
+            message,
+            title,
+            structureSummary,
+            context: directRelevantContext,
+            knowledgeBaseContext: directKnowledgeBaseContext.contextText,
+          }),
+          temperature: 0.2,
+          timeoutMs: editTimeoutMs,
+          stageName: '改写执行',
+          maxTokens: 420,
+        });
 
-      const directEditResult = sanitizeCopilotResponse(directEditOutput);
-      if (!directEditResult || directEditResult.intent !== 'edit') {
-        res.status(502).json({ error: '编辑执行阶段返回格式异常' });
-        return;
+        const directEditResult = sanitizeCopilotResponse(directEditOutput);
+        if (!directEditResult || directEditResult.intent !== 'edit') {
+          console.warn('[copilot] direct edit output invalid, fallback rewrite used');
+          res.status(200).json(buildEditFallbackResponse({ document, message }));
+          return;
+        }
+
+        res.status(200).json(validateEditResponseAgainstDocument(directEditResult, document));
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : '改写执行失败';
+        console.warn(`[copilot] direct edit model failed, fallback rewrite used: ${reason}`);
+        res.status(200).json(buildEditFallbackResponse({ document, message }));
       }
-
-      res.status(200).json(validateEditResponseAgainstDocument(directEditResult, document));
       return;
     }
 
@@ -1533,9 +1679,9 @@ export default async function handler(req: any, res: any) {
     const relevantContext = selectRelevantContext(
       document,
       `${message}\n${title}\n${outline}`,
-      routeDecision.intent === 'edit' ? 3 : 4,
-      routeDecision.intent === 'edit' ? 2200 : 4200,
-      routeDecision.intent === 'edit' ? 900 : 1600
+      routeDecision.intent === 'edit' ? 2 : 4,
+      routeDecision.intent === 'edit' ? 1800 : 4200,
+      routeDecision.intent === 'edit' ? 760 : 1600
     );
 
     if (routeDecision.intent === 'qa') {
@@ -1569,30 +1715,37 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const editOutput = await requestModelOutput({
-      baseUrl,
-      apiKey,
-      model: executionModel,
-      messages: buildEditExecutionMessages({
-        message,
-        title,
-        structureSummary,
-        context: relevantContext,
-        knowledgeBaseContext: knowledgeBaseContext.contextText,
-      }),
-      temperature: 0.2,
-      timeoutMs: editTimeoutMs,
-      stageName: '改写执行',
-      maxTokens: 520,
-    });
+    try {
+      const editOutput = await requestModelOutput({
+        baseUrl,
+        apiKey,
+        model: executionModel,
+        messages: buildEditExecutionMessages({
+          message,
+          title,
+          structureSummary,
+          context: relevantContext,
+          knowledgeBaseContext: knowledgeBaseContext.contextText,
+        }),
+        temperature: 0.2,
+        timeoutMs: editTimeoutMs,
+        stageName: '改写执行',
+        maxTokens: 420,
+      });
 
-    const editResult = sanitizeCopilotResponse(editOutput);
-    if (!editResult || editResult.intent !== 'edit') {
-      res.status(502).json({ error: '编辑执行阶段返回格式异常' });
-      return;
+      const editResult = sanitizeCopilotResponse(editOutput);
+      if (!editResult || editResult.intent !== 'edit') {
+        console.warn('[copilot] routed edit output invalid, fallback rewrite used');
+        res.status(200).json(buildEditFallbackResponse({ document, message }));
+        return;
+      }
+
+      res.status(200).json(validateEditResponseAgainstDocument(editResult, document));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : '改写执行失败';
+      console.warn(`[copilot] routed edit model failed, fallback rewrite used: ${reason}`);
+      res.status(200).json(buildEditFallbackResponse({ document, message }));
     }
-
-    res.status(200).json(validateEditResponseAgainstDocument(editResult, document));
   } catch (error) {
     const messageText = error instanceof Error ? error.message : 'Copilot 服务调用失败';
     res.status(500).json({ error: messageText });
