@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Mode, WritingState } from '../types/writing';
 import type { CopilotProgressState, PendingCopilotEdit } from '../types/copilot';
-import { getActiveScenarioData, setActiveScenarioId } from '../constants/mockData';
-import type { AgentConfig } from '../constants/mockData';
+import { getActiveScenarioData, setActiveScenarioId } from '../constants/scenarioData';
+import type { AgentConfig } from '../constants/scenarioData';
 import type {
   AgentConfigSnapshot,
   AgentWriteConfirmation,
@@ -662,7 +662,14 @@ export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
                       </div>
                       <div className="flex-1">
                         {typeof msg.content === 'string' ? (
-                          <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                          <div>
+                            {msg.variant === 'workflow-message' && msg.title ? (
+                              <div className="mb-1 text-xs font-medium tracking-wide text-sky-700">
+                                {msg.title}
+                              </div>
+                            ) : null}
+                            <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                          </div>
                         ) : (
                           msg.content
                         )}

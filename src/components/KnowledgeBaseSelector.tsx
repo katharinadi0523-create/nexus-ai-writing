@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { X, Search, RefreshCw, Plus } from 'lucide-react';
-import { groupKnowledgeBasesBySource } from '../constants/knowledgeBases';
+import { X, Search, RefreshCw, Plus, ChevronDown } from 'lucide-react';
+import {
+  groupKnowledgeBasesBySource,
+  getKnowledgeBaseByKey,
+} from '../constants/knowledgeBases';
+
+const knowledgeBaseGroups = groupKnowledgeBasesBySource();
 
 interface KnowledgeBaseSelectorProps {
   isOpen: boolean;
@@ -15,9 +20,11 @@ export const KnowledgeBaseSelector: React.FC<KnowledgeBaseSelectorProps> = ({
   onConfirm,
   initialSelectedIds = [],
 }) => {
-  const knowledgeBaseGroups = groupKnowledgeBasesBySource();
   const [activeTab, setActiveTab] = useState<string>(
     knowledgeBaseGroups[0]?.sourceLabel || ''
+  );
+  const [activeProject, setActiveProject] = useState<string>(
+    knowledgeBaseGroups[0]?.defaultProjectName || ''
   );
   const [selectedIds, setSelectedIds] = useState<string[]>(initialSelectedIds);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -25,8 +32,26 @@ export const KnowledgeBaseSelector: React.FC<KnowledgeBaseSelectorProps> = ({
   useEffect(() => {
     if (isOpen) {
       setSelectedIds(initialSelectedIds);
+      setSearchQuery('');
+
+      const firstSelectedKnowledgeBase = initialSelectedIds
+        .map((id) => getKnowledgeBaseByKey(id))
+        .find((knowledgeBase) => Boolean(knowledgeBase));
+
+      const fallbackGroup = knowledgeBaseGroups[0];
+      const nextActiveTab =
+        firstSelectedKnowledgeBase?.sourceLabel || fallbackGroup?.sourceLabel || '';
+      const nextActiveProject =
+        firstSelectedKnowledgeBase?.projectName ||
+        knowledgeBaseGroups.find((group) => group.sourceLabel === nextActiveTab)
+          ?.defaultProjectName ||
+        fallbackGroup?.defaultProjectName ||
+        '';
+
+      setActiveTab(nextActiveTab);
+      setActiveProject(nextActiveProject);
     }
-  }, [isOpen, initialSelectedIds]);
+  }, [isOpen, initialSelectedIds, knowledgeBaseGroups]);
 
   useEffect(() => {
     if (!knowledgeBaseGroups.some((group) => group.sourceLabel === activeTab)) {
@@ -34,12 +59,37 @@ export const KnowledgeBaseSelector: React.FC<KnowledgeBaseSelectorProps> = ({
     }
   }, [activeTab, knowledgeBaseGroups]);
 
+  useEffect(() => {
+    const currentGroup =
+      knowledgeBaseGroups.find((group) => group.sourceLabel === activeTab) ||
+      knowledgeBaseGroups[0];
+
+    if (!currentGroup) {
+      if (activeProject) {
+        setActiveProject('');
+      }
+      return;
+    }
+
+    if (!currentGroup.projects.some((project) => project.projectName === activeProject)) {
+      setActiveProject(currentGroup.defaultProjectName || '');
+    }
+  }, [activeProject, activeTab, knowledgeBaseGroups]);
+
   if (!isOpen) {
     return null;
   }
 
+  const currentGroup =
+    knowledgeBaseGroups.find((group) => group.sourceLabel === activeTab) ||
+    knowledgeBaseGroups[0];
+  const currentProjects = currentGroup?.projects || [];
+  const currentProjectName =
+    currentProjects.find((project) => project.projectName === activeProject)?.projectName ||
+    currentGroup?.defaultProjectName ||
+    '';
   const currentData =
-    knowledgeBaseGroups.find((group) => group.sourceLabel === activeTab)?.items || [];
+    currentProjects.find((project) => project.projectName === currentProjectName)?.items || [];
 
   const filteredData = currentData.filter((knowledgeBase) =>
     knowledgeBase.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -60,7 +110,7 @@ export const KnowledgeBaseSelector: React.FC<KnowledgeBaseSelectorProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="flex max-h-[80vh] w-[800px] flex-col rounded-lg bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-gray-200 p-4">
-          <h2 className="text-lg font-semibold text-gray-800">选择知识库</h2>
+          <h2 className="text-lg font-semibold text-gray-800">知识库</h2>
           <button
             onClick={onClose}
             className="rounded p-1 transition-colors hover:bg-gray-100"
@@ -76,6 +126,7 @@ export const KnowledgeBaseSelector: React.FC<KnowledgeBaseSelectorProps> = ({
                 key={group.sourceLabel}
                 onClick={() => {
                   setActiveTab(group.sourceLabel);
+                  setActiveProject(group.defaultProjectName || '');
                   setSearchQuery('');
                 }}
                 className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
@@ -88,11 +139,32 @@ export const KnowledgeBaseSelector: React.FC<KnowledgeBaseSelectorProps> = ({
               </button>
             ))}
           </div>
-        ) : (
-          <div className="border-b border-gray-200 px-4 py-3 text-sm font-medium text-gray-700">
-            {knowledgeBaseGroups[0]?.sourceLabel || '知识库'}
+        ) : null}
+
+        <div className="flex items-center justify-between gap-4 border-b border-gray-200 px-4 py-3">
+          <div className="text-sm font-medium text-gray-700">
+            {currentGroup?.sourceLabel || '知识库'}
           </div>
-        )}
+          {currentProjects.length > 0 ? (
+            <div className="relative w-[220px]">
+              <select
+                value={currentProjectName}
+                onChange={(event) => {
+                  setActiveProject(event.target.value);
+                  setSearchQuery('');
+                }}
+                className="h-10 w-full appearance-none rounded-md border border-gray-300 bg-white py-2 pl-3 pr-10 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {currentProjects.map((project) => (
+                  <option key={project.projectName} value={project.projectName}>
+                    {project.projectName}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            </div>
+          ) : null}
+        </div>
 
         <div className="flex items-center gap-2 border-b border-gray-200 p-4">
           <div className="relative flex-1">
@@ -125,7 +197,9 @@ export const KnowledgeBaseSelector: React.FC<KnowledgeBaseSelectorProps> = ({
               const itemCountText =
                 typeof knowledgeBase.itemCount === 'number'
                   ? `${knowledgeBase.itemCount}个`
-                  : '真实知识库';
+                  : knowledgeBase.retrievalMode === 'mock'
+                    ? '模拟知识库'
+                    : '真实知识库';
               const sizeText = knowledgeBase.size || knowledgeBase.sourceLabel;
 
               return (

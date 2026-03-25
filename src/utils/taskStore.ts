@@ -5,7 +5,7 @@
 
 import type React from 'react';
 import { GeneralContentSource, Mode, WritingState } from '../types/writing';
-import { ScenarioId } from '../constants/mockData';
+import { ScenarioId } from '../constants/scenarioData';
 import type { AgentConfigSnapshot, AgentWriteConfirmation, ChatMessageVariant } from '../types/chat';
 import type { WritingDocument } from '../types/document';
 
@@ -86,7 +86,7 @@ export interface Task {
 }
 
 const STORAGE_KEY = 'nexus_writing_tasks';
-const MAX_TASKS = 50; // 最多保存50个任务
+const MAX_TASKS = 10; // 最多保存10个任务
 
 /**
  * 获取所有任务
@@ -96,8 +96,13 @@ export function getAllTasks(): Task[] {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return [];
     const tasks: Task[] = JSON.parse(stored);
-    // 按更新时间倒序排列
-    return tasks.sort((a, b) => b.updatedAt - a.updatedAt);
+    // 按更新时间倒序排列，并保证只保留最近 MAX_TASKS 条
+    const sortedTasks = tasks.sort((a, b) => b.updatedAt - a.updatedAt);
+    const trimmedTasks = sortedTasks.slice(0, MAX_TASKS);
+    if (trimmedTasks.length !== tasks.length) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmedTasks));
+    }
+    return trimmedTasks;
   } catch (error) {
     console.error('Failed to load tasks:', error);
     return [];
@@ -119,11 +124,12 @@ export function saveTask(task: Task): void {
     } else {
       // 添加新任务
       tasks.push(task);
-      // 如果超过最大数量，删除最旧的任务
-      if (tasks.length > MAX_TASKS) {
-        tasks.sort((a, b) => b.updatedAt - a.updatedAt);
-        tasks.splice(MAX_TASKS);
-      }
+    }
+
+    // 每次保存都按更新时间排序并裁剪，确保历史任务最多保留 MAX_TASKS 条
+    tasks.sort((a, b) => b.updatedAt - a.updatedAt);
+    if (tasks.length > MAX_TASKS) {
+      tasks.splice(MAX_TASKS);
     }
     
     // 保存到 localStorage

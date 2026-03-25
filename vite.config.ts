@@ -89,13 +89,26 @@ function localApiPlugin(mode: string): Plugin {
         await handler(request, response);
       } catch (error) {
         if (!res.writableEnded) {
-          res.statusCode = 500;
-          res.setHeader('Content-Type', 'application/json; charset=utf-8');
-          res.end(
-            JSON.stringify({
-              error: error instanceof Error ? error.message : '本地 API 调用失败',
-            })
-          );
+          const message = error instanceof Error ? error.message : '本地 API 调用失败';
+
+          if (!res.headersSent) {
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            res.end(
+              JSON.stringify({
+                error: message,
+              })
+            );
+            return;
+          }
+
+          const contentType = String(res.getHeader('Content-Type') || '');
+          if (contentType.includes('text/event-stream')) {
+            res.write(`event: error\n`);
+            res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+          }
+
+          res.end();
         }
       }
     });

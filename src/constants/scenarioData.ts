@@ -21,9 +21,9 @@ export interface AgentConfig {
 }
 
 export interface AgentRuntimeConfig {
-  source: 'appforge';
+  source: 'appforge' | 'builtin';
   appId?: string;
-  agentType?: 'workflow';
+  agentType?: 'workflow' | 'content-stream';
 }
 
 export type AgentCategory = 'GENERAL' | 'PLANNING' | 'WORKFLOW';
@@ -33,7 +33,12 @@ export interface ScenarioData {
   name: string;
   category: AgentCategory;
   isFavorite?: boolean;
+  publisherLabel?: string;
+  publisherValue?: string;
+  cardTags?: string[];
+  cardIcon?: string;
   suggestedQuestion?: string;
+  suggestedQuestions?: string[];
   // 通用模式数据
   generalData: {
     outline: string;
@@ -47,12 +52,16 @@ export interface ScenarioData {
 /**
  * 已接入真实接口的智能体配置
  */
-export const mockDataStore: Record<ScenarioId, ScenarioData> = {
+export const scenarioStore: Record<ScenarioId, ScenarioData> = {
   'report-compile': {
     id: 'report-compile',
-    name: '报告整编',
+    name: 'Osint开源情报整编智能体',
     category: 'WORKFLOW',
     isFavorite: true,
+    publisherLabel: '组织/发布者',
+    publisherValue: 'AF产品组/Rowan',
+    cardTags: ['情报分析', '研究报告'],
+    cardIcon: 'radar',
     suggestedQuestion: '空军协同作战',
     generalData: {
       outline: '',
@@ -60,8 +69,8 @@ export const mockDataStore: Record<ScenarioId, ScenarioData> = {
     },
     agentConfig: {
       id: 'agent-report-compile',
-      name: '报告整编智能体',
-      description: '对接真实报告整编工作流，自动完成资料梳理、章节组织与全文整编。',
+      name: 'Osint开源情报整编智能体',
+      description: '对接真实 Osint 开源情报整编工作流，自动完成资料梳理、章节组织与全文整编。',
       memoryConfigs: [],
       paramConfigs: [],
     },
@@ -71,11 +80,45 @@ export const mockDataStore: Record<ScenarioId, ScenarioData> = {
       agentType: 'workflow',
     },
   },
+  'official-doc': {
+    id: 'official-doc',
+    name: '公文写作智能体',
+    category: 'WORKFLOW',
+    isFavorite: true,
+    publisherLabel: '组织/发布者',
+    publisherValue: '运营组/宋玲',
+    cardTags: ['公文写作', '政企办公'],
+    cardIcon: 'stamp',
+    suggestedQuestion: '帮我写一篇：《榜样10》专题节目的心得体会',
+    suggestedQuestions: [
+      '帮我写一篇：《榜样10》专题节目的心得体会',
+    ],
+    generalData: {
+      outline: '',
+      fullText: '',
+    },
+    agentConfig: {
+      id: 'agent-official-doc',
+      name: '公文写作智能体',
+      description: '对接真实公文写作智能体，按流式 content 输出生成公文、通知、心得体会等正文内容。',
+      memoryConfigs: [],
+      paramConfigs: [],
+    },
+    agentRuntime: {
+      source: 'appforge',
+      appId: 'app-nj4mkuyx',
+      agentType: 'content-stream',
+    },
+  },
   'oil-gas': {
     id: 'oil-gas',
     name: '10月油气价格分析',
     category: 'WORKFLOW',
     isFavorite: true,
+    publisherLabel: '组织/发布者',
+    publisherValue: '客户成功部/嘉华',
+    cardTags: ['能源行业', '经营分析'],
+    cardIcon: 'droplets',
     suggestedQuestion: '10月油气价格分析',
     generalData: {
       outline: '',
@@ -101,7 +144,99 @@ export const mockDataStore: Record<ScenarioId, ScenarioData> = {
       appId: 'app-c8kfj18j',
       agentType: 'workflow',
     },
-  }
+  },
+  'product-weekly': {
+    id: 'product-weekly',
+    name: '产品周报整理',
+    category: 'WORKFLOW',
+    cardTags: ['产品管理', '周报总结'],
+    cardIcon: 'clipboard',
+    suggestedQuestion: '根据本周公共知识库内容自动生成周报',
+    generalData: {
+      outline: '',
+      fullText: '',
+    },
+    agentConfig: {
+      id: 'agent-product-weekly',
+      name: '产品周报整理',
+      description: '检索本周周报文档并生成结构化产品周报。',
+      memoryConfigs: [],
+      paramConfigs: [],
+    },
+    agentRuntime: {
+      source: 'builtin',
+      agentType: 'workflow',
+    },
+  },
+  'market-research': {
+    id: 'market-research',
+    name: '市场研究报告生成',
+    category: 'WORKFLOW',
+    cardTags: ['市场研究', '行业分析'],
+    cardIcon: 'line-chart',
+    suggestedQuestion: 'AI4S行业研究报告',
+    generalData: {
+      outline: '',
+      fullText: '',
+    },
+    agentConfig: {
+      id: 'agent-market-research',
+      name: '市场研究报告生成',
+      description: '调用研究插件完成检索分析，并输出 AI4S 行业研究报告。',
+      memoryConfigs: [],
+      paramConfigs: [],
+    },
+    agentRuntime: {
+      source: 'builtin',
+      agentType: 'workflow',
+    },
+  },
+  'bid-document': {
+    id: 'bid-document',
+    name: '招标文档专家',
+    category: 'WORKFLOW',
+    cardTags: ['招投标', '项目文档'],
+    cardIcon: 'file-check',
+    suggestedQuestion: '为“智慧园区视频监控系统建设项目”生成招标文件技术规范书',
+    generalData: {
+      outline: '',
+      fullText: '',
+    },
+    agentConfig: {
+      id: 'agent-bid-document',
+      name: '招标文档专家',
+      description: '完成招投标材料模板匹配、条款校验与技术规范生成。',
+      memoryConfigs: [],
+      paramConfigs: [],
+    },
+    agentRuntime: {
+      source: 'builtin',
+      agentType: 'workflow',
+    },
+  },
+  'business-report': {
+    id: 'business-report',
+    name: '经营报告生成',
+    category: 'WORKFLOW',
+    cardTags: ['经营分析', '管理汇报'],
+    cardIcon: 'briefcase',
+    suggestedQuestion: '生成2026年2月经营分析报告',
+    generalData: {
+      outline: '',
+      fullText: '',
+    },
+    agentConfig: {
+      id: 'agent-business-report',
+      name: '经营报告生成',
+      description: '汇总经营指标、识别经营波动并输出经营分析报告。',
+      memoryConfigs: [],
+      paramConfigs: [],
+    },
+    agentRuntime: {
+      source: 'builtin',
+      agentType: 'workflow',
+    },
+  },
 };
 
 /**
@@ -114,7 +249,7 @@ export function setActiveScenarioId(id: ScenarioId): void {
 }
 
 export function getActiveScenarioData(): ScenarioData | null {
-  return mockDataStore[activeScenarioId] || null;
+  return scenarioStore[activeScenarioId] || null;
 }
 
 /**
@@ -135,7 +270,7 @@ export interface KnowledgeBaseData {
 }
 
 /**
- * 知识库 Mock 数据
+ * 知识库示例数据
  */
 export const knowledgeBaseData: KnowledgeBaseData = {
   appDevelopment: [

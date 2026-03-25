@@ -10,11 +10,18 @@ interface EditorProps {
   content: string;
   writingState: WritingState;
   onContentChange?: (content: string) => void;
+  onStopGenerate?: () => void;
   /** 改写请求回调：选中的文本、改写类型、自定义要求（可选） */
   onRewriteRequest?: (selectedText: string, type: RewriteType, customPrompt?: string) => Promise<string>;
 }
 
-export const Editor: React.FC<EditorProps> = ({ content, writingState, onContentChange, onRewriteRequest }) => {
+export const Editor: React.FC<EditorProps> = ({
+  content,
+  writingState,
+  onContentChange,
+  onStopGenerate,
+  onRewriteRequest,
+}) => {
   interface RewriteSelectionState {
     selectedText: string;
     position: { top: number; left: number };
@@ -122,14 +129,26 @@ export const Editor: React.FC<EditorProps> = ({ content, writingState, onContent
         if (content.length > currentMarkdown.length && content.startsWith(currentMarkdown)) {
           // 追加新内容部分
           const newContent = content.slice(currentMarkdown.length);
-          if (newContent.trim()) {
-            // 将光标移到末尾，然后插入内容
-            const endPos = editor.state.doc.content.size;
-            editor.commands.setTextSelection(endPos);
-            // TipTap 的 Markdown 扩展会自动处理 Markdown 格式
-            editor.commands.insertContent(newContent);
-            lastSyncedContentRef.current = content;
+          if (!newContent) {
+            return;
           }
+
+          const containsLineBreak = /[\r\n]/.test(newContent);
+          const isWhitespaceOnly = newContent.trim().length === 0;
+
+          if (containsLineBreak || isWhitespaceOnly) {
+            // 段落换行与纯空白块必须走完整 Markdown 重建，否则会被增量插入折叠掉。
+            editor.commands.setContent(content);
+            lastSyncedContentRef.current = content;
+            return;
+          }
+
+          // 将光标移到末尾，然后插入内容
+          const endPos = editor.state.doc.content.size;
+          editor.commands.setTextSelection(endPos);
+          // TipTap 的 Markdown 扩展会自动处理 Markdown 格式
+          editor.commands.insertContent(newContent);
+          lastSyncedContentRef.current = content;
         } else if (content.length < currentMarkdown.length || !content.startsWith(currentMarkdown)) {
           // 如果内容结构发生变化或被重置，重新设置完整内容
           editor.commands.setContent(content);
@@ -612,7 +631,11 @@ export const Editor: React.FC<EditorProps> = ({ content, writingState, onContent
         <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-10">
           <div className="bg-gray-800 text-white px-6 py-2 rounded-full flex items-center gap-2 shadow-lg">
             <span>{statusText}</span>
-            <button className="ml-2 hover:bg-gray-700 rounded px-2 py-1 text-sm">
+            <button
+              type="button"
+              onClick={onStopGenerate}
+              className="ml-2 hover:bg-gray-700 rounded px-2 py-1 text-sm"
+            >
               停止
             </button>
           </div>

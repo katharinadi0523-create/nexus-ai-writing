@@ -2,7 +2,7 @@
  * 根据用户输入的关键词匹配已接入的真实智能体场景
  */
 
-import { ScenarioId } from '../constants/mockData';
+import { ScenarioId } from '../constants/scenarioData';
 
 /** 关键词组与场景的映射配置 */
 const KEYWORD_SCENARIO_MAP: Array<{
@@ -14,8 +14,12 @@ const KEYWORD_SCENARIO_MAP: Array<{
     scenarioId: 'oil-gas',
   },
   {
-    keywords: ['空军', '协同作战', '报告整编', '整编'],
+    keywords: ['空军', '协同作战', '报告整编', '整编', 'osint', '开源情报'],
     scenarioId: 'report-compile',
+  },
+  {
+    keywords: ['公文', '心得体会', '请示', '通知', '发言稿'],
+    scenarioId: 'official-doc',
   },
 ];
 

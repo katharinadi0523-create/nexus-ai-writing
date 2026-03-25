@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Mode } from '../types/writing';
-import { mockDataStore, setActiveScenarioId, ScenarioId } from '../constants/mockData';
+import { scenarioStore, setActiveScenarioId, ScenarioId } from '../constants/scenarioData';
 import { InputArea } from '../components/InputArea';
 import { KnowledgeBaseSelector } from '../components/KnowledgeBaseSelector';
 import { MemoryModal } from '../components/MemoryModal';
 import { ParamsModal } from '../components/ParamsModal';
-import { Brain, GitBranch, Sparkles, Star } from 'lucide-react';
+import { Star } from 'lucide-react';
+import { getScenarioIcon } from '../utils/scenarioVisuals';
 
 const FAVORITE_AGENTS_STORAGE_KEY = 'favoriteAgentIds';
+const AGENTS_PER_PAGE = 6;
 
 interface HomeViewProps {
   onStartWriting: (input: string, mode: Mode, scenarioId?: ScenarioId) => void;
@@ -31,9 +33,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const [isMemoryModalOpen, setIsMemoryModalOpen] = useState<boolean>(false);
   const [isParamsModalOpen, setIsParamsModalOpen] = useState<boolean>(false);
   const [activeAgentTab, setActiveAgentTab] = useState<'organization' | 'favorite'>('organization');
+  const [currentPage, setCurrentPage] = useState<number>(1);
   const [favoriteAgentIds, setFavoriteAgentIds] = useState<ScenarioId[]>(() => {
     if (typeof window === 'undefined') {
-      return Object.values(mockDataStore)
+      return Object.values(scenarioStore)
         .filter((scenario) => scenario.isFavorite)
         .map((scenario) => scenario.id);
     }
@@ -50,12 +53,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
       console.error('读取收藏智能体失败:', error);
     }
 
-    return Object.values(mockDataStore)
+    return Object.values(scenarioStore)
       .filter((scenario) => scenario.isFavorite)
       .map((scenario) => scenario.id);
   });
 
-  const allScenarios = Object.values(mockDataStore);
+  const allScenarios = Object.values(scenarioStore);
 
   // 同步外部选择的场景
   useEffect(() => {
@@ -105,17 +108,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
     }
   };
 
-  const getCategoryIcon = (category: string) => {
-    switch (category) {
-      case 'PLANNING':
-        return Brain;
-      case 'WORKFLOW':
-        return GitBranch;
-      default:
-        return Sparkles;
-    }
-  };
-
   const getCategoryColor = (category: string) => {
     switch (category) {
       case 'PLANNING':
@@ -141,9 +133,24 @@ export const HomeView: React.FC<HomeViewProps> = ({
     activeAgentTab === 'favorite'
       ? allScenarios.filter((scenario) => favoriteAgentIds.includes(scenario.id))
       : allScenarios;
+  const totalPages = Math.max(1, Math.ceil(displayedScenarios.length / AGENTS_PER_PAGE));
+  const pagedScenarios = displayedScenarios.slice(
+    (currentPage - 1) * AGENTS_PER_PAGE,
+    currentPage * AGENTS_PER_PAGE
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeAgentTab]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   return (
-    <div className="relative h-screen flex flex-col bg-gray-50">
+    <div className="relative flex h-full min-h-0 flex-col overflow-y-auto bg-gray-50">
       {/* 主标题 */}
       <div className="text-center py-12">
         <h1 className="text-6xl font-bold text-gray-800 mb-4">
@@ -198,9 +205,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
         {selectedAgentId && (() => {
           const selectedScenario = allScenarios.find(s => s.id === selectedAgentId);
           if (selectedScenario) {
-            const suggestedQuestion =
-              selectedScenario.suggestedQuestion || `写一篇${selectedScenario.name}`;
-            const handleSuggestedQuestionClick = () => {
+            const suggestedQuestions =
+              selectedScenario.suggestedQuestions?.filter((item) => item.trim()) ||
+              (selectedScenario.suggestedQuestion
+                ? [selectedScenario.suggestedQuestion]
+                : [`写一篇${selectedScenario.name}`]);
+            const handleSuggestedQuestionClick = (suggestedQuestion: string) => {
               setInput(suggestedQuestion);
               // 使用 setTimeout 确保输入框更新后再发送
               setTimeout(() => {
@@ -214,12 +224,17 @@ export const HomeView: React.FC<HomeViewProps> = ({
             return (
               <div className="mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="text-sm text-gray-500 mb-2">推荐问题：</div>
-                <button
-                  onClick={handleSuggestedQuestionClick}
-                  className="px-4 py-2.5 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 hover:border-blue-300 transition-all shadow-sm hover:shadow-md w-full text-left"
-                >
-                  {suggestedQuestion}
-                </button>
+                <div className="flex flex-col gap-2">
+                  {suggestedQuestions.map((suggestedQuestion) => (
+                    <button
+                      key={suggestedQuestion}
+                      onClick={() => handleSuggestedQuestionClick(suggestedQuestion)}
+                      className="px-4 py-2.5 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 hover:border-blue-300 transition-all shadow-sm hover:shadow-md w-full text-left"
+                    >
+                      {suggestedQuestion}
+                    </button>
+                  ))}
+                </div>
               </div>
             );
           }
@@ -228,7 +243,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
       </div>
 
       {/* 智能体列表区域 */}
-      <div className="w-full max-w-6xl mx-auto px-8 flex-1 overflow-y-auto">
+      <div className="flex-1 w-full max-w-6xl mx-auto px-8 pb-8">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
             <h2 className="text-2xl font-semibold text-gray-700">智能体</h2>
@@ -256,6 +271,33 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1">
+              <button
+                onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                  currentPage === 1
+                    ? 'cursor-not-allowed text-gray-300'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                上一页
+              </button>
+              <div className="px-2 text-sm text-gray-500">
+                {currentPage} / {totalPages}
+              </div>
+              <button
+                onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                  currentPage === totalPages
+                    ? 'cursor-not-allowed text-gray-300'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                下一页
+              </button>
+            </div>
             <button className="px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
               + 创建智能体
             </button>
@@ -263,12 +305,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
 
         {/* 智能体卡片网格 */}
-        <div className="grid grid-cols-3 gap-4">
-          {displayedScenarios.map((scenario) => {
-            const IconComponent = getCategoryIcon(scenario.category);
+        <div className="grid min-h-[320px] grid-cols-3 gap-4">
+          {pagedScenarios.map((scenario) => {
+            const IconComponent = getScenarioIcon(scenario.cardIcon, scenario.category);
             const isSelected = selectedAgentId === scenario.id;
             const colorClass = getCategoryColor(scenario.category);
             const isFavorite = favoriteAgentIds.includes(scenario.id);
+            const cardTags = scenario.cardTags?.slice(0, 2) || ['通用写作', '业务支持'];
 
             return (
               <div
@@ -304,11 +347,24 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-gray-800 mb-1">{scenario.agentConfig.name}</h3>
-                    <p className="text-xs text-gray-500 mb-2">@发布者</p>
+                    <div className="mb-2">
+                      <p className="text-[11px] uppercase tracking-[0.08em] text-gray-400">
+                        {scenario.publisherLabel || '组织/发布者'}
+                      </p>
+                      <p className="text-xs font-medium text-gray-600">
+                        {scenario.publisherValue || '-'}
+                      </p>
+                    </div>
                     <p className="text-sm text-gray-600 line-clamp-2">{scenario.agentConfig.description}</p>
                     <div className="flex items-center gap-2 mt-3">
-                      <span className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded">办公人事</span>
-                      <span className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded">企业服务</span>
+                      {cardTags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded"
+                        >
+                          {tag}
+                        </span>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -322,6 +378,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             暂无收藏智能体，点击卡片右上角星标即可加入“我的收藏”
           </div>
         )}
+
       </div>
 
       {/* 知识库选择器弹窗 */}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, HelpCircle } from 'lucide-react';
-import { getActiveScenarioData } from '../constants/mockData';
+import { getActiveScenarioData } from '../constants/scenarioData';
 import { getParamValues, setParamValues, resetParamValues } from '../store/writingStore';
 
 interface ParamsModalProps {

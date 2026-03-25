@@ -3,7 +3,7 @@
  * 用于存储记忆变量和参数配置的值
  */
 
-import { ScenarioId } from '../constants/mockData';
+import { ScenarioId } from '../constants/scenarioData';
 
 /**
  * 记忆变量值存储

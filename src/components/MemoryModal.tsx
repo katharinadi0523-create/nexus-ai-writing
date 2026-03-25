@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
-import { getActiveScenarioData } from '../constants/mockData';
+import { getActiveScenarioData } from '../constants/scenarioData';
 import { getMemoryValues, setMemoryValues, resetMemoryValues } from '../store/writingStore';
 
 interface MemoryModalProps {

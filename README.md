@@ -24,7 +24,8 @@
 
 当前代码内置场景：
 
-- `report-compile`：报告整编（工作流）
+- `report-compile`：Osint开源情报整编智能体（工作流）
+- `official-doc`：公文写作智能体（流式 content 输出）
 - `oil-gas`：10月油气价格分析（工作流，含参数 `special_anal_points`）
 
 当前代码内置知识库（AppForge 来源）：
@@ -104,8 +105,10 @@ npm run preview
 | 变量 | 默认值（代码） | 说明 |
 | --- | --- | --- |
 | `APPFORGE_BASE_URL` | `http://110.154.34.22:37755/appforge/openapi/v1` | 工作流调用基地址 |
-| `APPFORGE_REPORT_COMPILE_APP_ID` | `app-6p23bh2c` | 报告整编 appId |
-| `APPFORGE_REPORT_COMPILE_TOKEN` | 内置默认 token | 报告整编 token |
+| `APPFORGE_REPORT_COMPILE_APP_ID` | `app-6p23bh2c` | Osint开源情报整编智能体 appId |
+| `APPFORGE_REPORT_COMPILE_TOKEN` | 内置默认 token | Osint开源情报整编智能体 token |
+| `APPFORGE_OFFICIAL_DOC_APP_ID` | `app-nj4mkuyx` | 公文写作智能体 appId |
+| `APPFORGE_OFFICIAL_DOC_TOKEN` | 内置默认 token | 公文写作智能体 token |
 | `APPFORGE_OIL_GAS_APP_ID` | `app-c8kfj18j` | 油气分析 appId |
 | `APPFORGE_OIL_GAS_TOKEN` | 内置默认 token | 油气分析 token |
 
@@ -286,4 +289,3 @@ nexus-writing-studio/
 
 - `npm run lint` 当前会失败（仓库未安装 `eslint` 依赖）。
 - 生产构建有大包体积告警（`> 500KB`），后续可做按路由或按功能拆包。
-

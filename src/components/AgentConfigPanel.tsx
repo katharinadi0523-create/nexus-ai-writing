@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AgentConfig } from '../constants/mockData';
+import { AgentConfig } from '../constants/scenarioData';
 
 const areConfigsEqual = (
   left: Record<string, any>,

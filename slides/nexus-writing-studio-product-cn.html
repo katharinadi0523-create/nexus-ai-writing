@@ -16,22 +16,22 @@
        Centralized colors, spacing, and animation timing.
        =========================================== */
     :root {
-      --bg-primary: #07111f;
-      --bg-secondary: #0d1b30;
-      --panel: rgba(12, 27, 47, 0.78);
-      --panel-strong: rgba(8, 19, 35, 0.92);
-      --panel-soft: rgba(18, 39, 66, 0.62);
-      --border: rgba(157, 186, 221, 0.18);
-      --text-primary: #f5f7fb;
-      --text-secondary: #a8bfd8;
-      --text-muted: #7d94ab;
-      --accent: #7fd4ff;
-      --accent-strong: #57b8f4;
-      --accent-warm: #f0b46a;
-      --accent-warm-soft: rgba(240, 180, 106, 0.14);
-      --accent-glow: rgba(87, 184, 244, 0.22);
-      --success: #5dd5aa;
-      --shadow: 0 30px 80px rgba(0, 0, 0, 0.28);
+      --bg-primary: #f4f8ff;
+      --bg-secondary: #e7f0fb;
+      --panel: rgba(255, 255, 255, 0.86);
+      --panel-strong: rgba(248, 252, 255, 0.96);
+      --panel-soft: rgba(231, 240, 251, 0.84);
+      --border: rgba(132, 167, 210, 0.24);
+      --text-primary: #15385f;
+      --text-secondary: #4d6f97;
+      --text-muted: #8099b8;
+      --accent: #82c2ff;
+      --accent-strong: #4d9af5;
+      --accent-warm: #c4e3ff;
+      --accent-warm-soft: rgba(196, 227, 255, 0.36);
+      --accent-glow: rgba(102, 174, 245, 0.18);
+      --success: #49c49a;
+      --shadow: 0 24px 56px rgba(108, 149, 202, 0.14);
       --font-display: "Noto Serif SC", "Songti SC", serif;
       --font-body: "Noto Sans SC", "PingFang SC", sans-serif;
       --font-mono: "IBM Plex Mono", monospace;
@@ -73,10 +73,10 @@
       font-family: var(--font-body);
       color: var(--text-primary);
       background:
-        radial-gradient(circle at 12% 18%, rgba(87, 184, 244, 0.17), transparent 28%),
-        radial-gradient(circle at 82% 22%, rgba(240, 180, 106, 0.1), transparent 30%),
-        radial-gradient(circle at 60% 78%, rgba(93, 213, 170, 0.1), transparent 26%),
-        linear-gradient(145deg, #04101e 0%, #08182b 48%, #061120 100%);
+        radial-gradient(circle at 14% 18%, rgba(130, 194, 255, 0.22), transparent 30%),
+        radial-gradient(circle at 82% 20%, rgba(196, 227, 255, 0.44), transparent 32%),
+        radial-gradient(circle at 55% 78%, rgba(73, 196, 154, 0.08), transparent 24%),
+        linear-gradient(145deg, #f8fbff 0%, #edf5ff 48%, #f4f8ff 100%);
       position: relative;
     }
 
@@ -85,12 +85,12 @@
       position: fixed;
       inset: 0;
       background-image:
-        linear-gradient(rgba(127, 212, 255, 0.055) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(127, 212, 255, 0.045) 1px, transparent 1px);
+        linear-gradient(rgba(130, 194, 255, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(130, 194, 255, 0.06) 1px, transparent 1px);
       background-size: min(5vw, 42px) min(5vw, 42px);
       mask-image: radial-gradient(circle at center, black 52%, transparent 100%);
       pointer-events: none;
-      opacity: 0.42;
+      opacity: 0.5;
     }
 
     main {
@@ -183,6 +183,16 @@
 
     .accent {
       color: var(--accent-warm);
+    }
+
+    .hero-copy .accent {
+      color: #4b84cf;
+      font-weight: 600;
+    }
+
+    .closing-panel .accent {
+      color: #4b84cf;
+      font-weight: 600;
     }
 
     .muted {
@@ -302,7 +312,7 @@
 
     .mode-card {
       background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(232, 241, 252, 0.72)),
         var(--panel-strong);
       display: flex;
       flex-direction: column;
@@ -329,14 +339,14 @@
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--text-primary);
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.09);
+      background: rgba(244, 248, 255, 0.92);
+      border: 1px solid rgba(132, 167, 210, 0.2);
     }
 
     .label-pill.warm {
       background: var(--accent-warm-soft);
-      border-color: rgba(240, 180, 106, 0.3);
-      color: #ffdcb4;
+      border-color: rgba(130, 194, 255, 0.28);
+      color: var(--accent-strong);
     }
 
     .feature-list,
@@ -362,7 +372,7 @@
       height: 0.42rem;
       border-radius: 50%;
       background: linear-gradient(135deg, var(--accent), var(--accent-warm));
-      box-shadow: 0 0 18px rgba(127, 212, 255, 0.35);
+      box-shadow: 0 0 18px rgba(102, 174, 245, 0.2);
     }
 
     .hero {
@@ -391,10 +401,10 @@
       padding: clamp(0.9rem, 1.6vw, 1.3rem);
       overflow: hidden;
       border-radius: 1.8rem;
-      border: 1px solid rgba(127, 212, 255, 0.18);
+      border: 1px solid rgba(132, 167, 210, 0.22);
       background:
-        radial-gradient(circle at 50% 50%, rgba(127, 212, 255, 0.12), transparent 42%),
-        linear-gradient(180deg, rgba(8, 19, 35, 0.4), rgba(8, 19, 35, 0.92));
+        radial-gradient(circle at 50% 50%, rgba(130, 194, 255, 0.24), transparent 42%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(231, 240, 251, 0.94));
       box-shadow: var(--shadow);
     }
 
@@ -409,17 +419,17 @@
     .hero-art::before {
       width: min(36vw, 460px);
       height: min(36vw, 460px);
-      border: 1px solid rgba(127, 212, 255, 0.25);
+      border: 1px solid rgba(130, 194, 255, 0.28);
       box-shadow:
-        inset 0 0 60px rgba(127, 212, 255, 0.12),
-        0 0 60px rgba(127, 212, 255, 0.08);
+        inset 0 0 60px rgba(130, 194, 255, 0.12),
+        0 0 60px rgba(130, 194, 255, 0.1);
     }
 
     .hero-art::after {
       width: min(22vw, 280px);
       height: min(22vw, 280px);
       background:
-        radial-gradient(circle at 50% 50%, rgba(240, 180, 106, 0.25), rgba(87, 184, 244, 0.08) 48%, transparent 70%);
+        radial-gradient(circle at 50% 50%, rgba(196, 227, 255, 0.72), rgba(130, 194, 255, 0.16) 48%, transparent 70%);
       filter: blur(0.4px);
     }
 
@@ -428,9 +438,9 @@
       width: 100%;
       padding: 1rem 1rem 0.95rem;
       border-radius: 1.2rem;
-      background: rgba(7, 17, 31, 0.86);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      box-shadow: 0 24px 50px rgba(0, 0, 0, 0.28);
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(132, 167, 210, 0.16);
+      box-shadow: 0 18px 36px rgba(108, 149, 202, 0.12);
       z-index: 2;
     }
 
@@ -448,8 +458,8 @@
       grid-area: center;
       padding: 1.15rem;
       text-align: left;
-      background: rgba(17, 39, 66, 0.86);
-      border-color: rgba(127, 212, 255, 0.25);
+      background: rgba(236, 244, 255, 0.96);
+      border-color: rgba(130, 194, 255, 0.28);
     }
 
     .orbit-panel h3 {
@@ -472,8 +482,8 @@
     .hero-stat {
       padding: 0.7rem 0.9rem;
       border-radius: 1rem;
-      background: rgba(255, 255, 255, 0.045);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid rgba(132, 167, 210, 0.16);
       min-width: 7.5rem;
     }
 
@@ -497,6 +507,24 @@
       max-width: 62rem;
     }
 
+    .agent-mode-shell {
+      width: min(100%, 1200px);
+    }
+
+    .agent-mode-shell .section-header {
+      max-width: 61rem;
+      margin-inline: auto;
+      gap: 0.4rem;
+    }
+
+    .agent-mode-shell h2 {
+      max-width: 13.3em;
+    }
+
+    .agent-mode-shell .lead {
+      max-width: 44rem;
+    }
+
     .flow-line {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -508,8 +536,8 @@
       position: relative;
       padding: 1rem 1rem 0.95rem;
       border-radius: 1.2rem;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.94);
+      border: 1px solid rgba(132, 167, 210, 0.16);
       min-height: 0;
     }
 
@@ -534,7 +562,7 @@
       right: calc(-1 * clamp(0.55rem, 1.2vw, 0.8rem));
       width: clamp(1.1rem, 2vw, 1.6rem);
       height: 1px;
-      background: linear-gradient(90deg, rgba(127, 212, 255, 0.45), rgba(240, 180, 106, 0.45));
+      background: linear-gradient(90deg, rgba(130, 194, 255, 0.55), rgba(196, 227, 255, 0.9));
     }
 
     .step-stack {
@@ -547,7 +575,7 @@
       grid-template-columns: auto 1fr;
       align-items: start;
       gap: 0.9rem;
-      background: linear-gradient(180deg, rgba(17, 39, 66, 0.92), rgba(7, 17, 31, 0.88));
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(233, 242, 252, 0.92));
     }
 
     .step-index {
@@ -568,7 +596,7 @@
       padding: clamp(1rem, 2vw, 1.45rem);
       border-radius: 1.4rem;
       background:
-        linear-gradient(145deg, rgba(240, 180, 106, 0.1), rgba(127, 212, 255, 0.08)),
+        linear-gradient(145deg, rgba(196, 227, 255, 0.7), rgba(255, 255, 255, 0.92)),
         var(--panel-strong);
       position: relative;
       overflow: hidden;
@@ -581,19 +609,19 @@
       right: 0.75rem;
       font-family: var(--font-display);
       font-size: clamp(3rem, 9vw, 5.2rem);
-      color: rgba(255, 255, 255, 0.06);
+      color: rgba(115, 165, 220, 0.12);
     }
 
     .quote-card p {
-      color: #dce7f3;
+      color: var(--text-secondary);
     }
 
     .image-panel {
       border-radius: 1.45rem;
       padding: 0.8rem;
       background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
-        rgba(6, 17, 31, 0.86);
+        linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(233, 242, 252, 0.86)),
+        rgba(255, 255, 255, 0.88);
     }
 
     .slide-image {
@@ -606,15 +634,15 @@
     }
 
     .slide-image.screenshot {
-      border: 1px solid rgba(127, 212, 255, 0.18);
-      box-shadow: 0 0 28px rgba(87, 184, 244, 0.12);
-      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(132, 167, 210, 0.18);
+      box-shadow: 0 0 28px rgba(102, 174, 245, 0.08);
+      background: rgba(255, 255, 255, 0.95);
     }
 
     .slide-image.workflow {
-      border: 1px solid rgba(240, 180, 106, 0.2);
-      box-shadow: 0 0 28px rgba(240, 180, 106, 0.1);
-      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(132, 167, 210, 0.2);
+      box-shadow: 0 0 28px rgba(130, 194, 255, 0.08);
+      background: rgba(255, 255, 255, 0.95);
     }
 
     .image-caption {
@@ -629,13 +657,13 @@
     }
 
     .metric-card {
-      background: linear-gradient(180deg, rgba(17, 39, 66, 0.8), rgba(7, 17, 31, 0.84));
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(233, 242, 252, 0.9));
     }
 
     .metric-card strong {
       display: block;
       font-size: clamp(1rem, 1.8vw, 1.35rem);
-      color: var(--accent-warm);
+      color: var(--accent-strong);
       margin-bottom: 0.35rem;
     }
 
@@ -650,7 +678,7 @@
       border-radius: 1.25rem;
       padding: 1rem 1rem 0.95rem;
       border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.035);
+      background: rgba(255, 255, 255, 0.94);
       position: relative;
     }
 
@@ -679,8 +707,8 @@
       gap: 1rem;
       align-items: center;
       background:
-        radial-gradient(circle at 80% 20%, rgba(127, 212, 255, 0.14), transparent 35%),
-        linear-gradient(135deg, rgba(12, 27, 47, 0.92), rgba(7, 17, 31, 0.95));
+        radial-gradient(circle at 80% 20%, rgba(130, 194, 255, 0.18), transparent 35%),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(232, 241, 252, 0.92));
     }
 
     .closing-panel .summary-list {
@@ -691,8 +719,8 @@
     .summary-item {
       padding: 0.8rem 0.95rem;
       border-radius: 1rem;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid rgba(132, 167, 210, 0.16);
     }
 
     .summary-item strong {
@@ -706,7 +734,1079 @@
       display: block;
       font-size: var(--small-size);
       line-height: 1.55;
+      color: #5d7ea5;
+    }
+
+    .dual-stage-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 0.84fr) minmax(0, 1.16fr);
+      gap: clamp(0.85rem, 1.8vw, 1.2rem);
+      align-items: stretch;
+      min-height: 0;
+    }
+
+    .demand-column,
+    .gallery-column {
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .demand-column {
+      display: flex;
+      flex-direction: column;
+      gap: 0.8rem;
+    }
+
+    .demand-stack {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .need-card {
+      padding: clamp(0.95rem, 1.75vw, 1.15rem);
+      border-radius: 1.35rem;
+      border: 1px solid var(--border);
+      background:
+        linear-gradient(165deg, rgba(255, 255, 255, 0.96), rgba(232, 241, 252, 0.84)),
+        var(--panel-strong);
+      box-shadow: var(--shadow);
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    .need-card strong {
+      font-size: clamp(0.82rem, 1vw, 0.95rem);
+      color: var(--accent);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-family: var(--font-mono);
+    }
+
+    .need-card h3 {
+      font-size: clamp(1.02rem, 1.5vw, 1.3rem);
+      color: var(--text-primary);
+      line-height: 1.28;
+    }
+
+    .need-card p {
+      font-size: var(--small-size);
+      color: var(--text-secondary);
+      line-height: 1.62;
+    }
+
+    .need-points {
+      display: grid;
+      gap: 0.55rem;
+    }
+
+    .need-point {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.6rem;
+      align-items: start;
+      padding: 0.7rem 0.8rem;
+      border-radius: 1rem;
+      background: rgba(255, 255, 255, 0.94);
+      border: 1px solid rgba(132, 167, 210, 0.16);
+    }
+
+    .need-point-index {
+      width: 1.45rem;
+      height: 1.45rem;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, var(--accent), var(--accent-warm));
+      color: var(--bg-primary);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      flex-shrink: 0;
+    }
+
+    .need-point span {
+      display: block;
+      font-size: var(--small-size);
+      line-height: 1.5;
       color: var(--text-muted);
+    }
+
+    .dual-bridge {
+      padding: 0.85rem 0.95rem;
+      border-radius: 1.15rem;
+      border: 1px solid rgba(132, 167, 210, 0.22);
+      background:
+        radial-gradient(circle at 10% 50%, rgba(130, 194, 255, 0.18), transparent 38%),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(231, 240, 251, 0.94));
+      display: grid;
+      gap: 0.28rem;
+    }
+
+    .dual-bridge strong {
+      font-size: clamp(0.86rem, 1.2vw, 1rem);
+      color: var(--text-primary);
+    }
+
+    .dual-bridge p {
+      font-size: var(--small-size);
+      color: var(--text-secondary);
+    }
+
+    .value-mode-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.85rem;
+      align-items: stretch;
+    }
+
+    .value-card {
+      gap: 0.75rem;
+    }
+
+    .value-card.warm {
+      border-color: rgba(132, 167, 210, 0.22);
+      background:
+        linear-gradient(165deg, rgba(196, 227, 255, 0.62), rgba(255, 255, 255, 0.92)),
+        var(--panel-strong);
+    }
+
+    .value-card h3 {
+      margin-top: -0.1rem;
+    }
+
+    .mode-focus-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.48fr) minmax(0, 0.52fr);
+      gap: 0.9rem;
+      align-items: stretch;
+      min-height: 0;
+    }
+
+    .mode-focus-grid.agent-layout {
+      grid-template-columns: minmax(18rem, 36rem) minmax(16rem, 23rem);
+      justify-content: start;
+      align-items: start;
+      gap: 1rem 1.15rem;
+      width: min(100%, 60.2rem);
+      margin-inline: auto;
+    }
+
+    .mode-gallery-panel {
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .mode-gallery-panel .gallery-canvas {
+      min-height: min(48vh, 450px);
+      padding: 0.65rem;
+    }
+
+    .mode-gallery-panel.agent {
+      width: 100%;
+      max-width: 36rem;
+    }
+
+    .mode-gallery-panel.agent .gallery-canvas {
+      min-height: 0;
+      padding: 0.72rem;
+    }
+
+    .mode-gallery-panel.agent .gallery-stage {
+      min-height: 0;
+      height: auto;
+      aspect-ratio: 1.18 / 1;
+      max-height: none;
+    }
+
+    .mode-gallery-panel .gallery-stage {
+      min-height: min(43vh, 410px);
+      background: linear-gradient(180deg, rgba(243, 247, 254, 0.98), rgba(232, 238, 248, 0.98));
+    }
+
+    .mode-insight-column {
+      display: grid;
+      gap: 0.75rem;
+      align-content: start;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .agent-layout .mode-insight-column {
+      width: 100%;
+      max-width: 24rem;
+      justify-self: stretch;
+      gap: 0.8rem;
+    }
+
+    .insight-card {
+      padding: 0.95rem 1rem;
+      border-radius: 1.15rem;
+      border: 1px solid rgba(157, 186, 221, 0.16);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(231, 240, 251, 0.92));
+      box-shadow: var(--shadow);
+      display: grid;
+      gap: 0.55rem;
+    }
+
+    .insight-card.warm {
+      border-color: rgba(132, 167, 210, 0.22);
+      background:
+        linear-gradient(180deg, rgba(244, 249, 255, 0.98), rgba(230, 240, 252, 0.94));
+    }
+
+    .insight-card h3 {
+      font-size: clamp(0.94rem, 1.28vw, 1.12rem);
+      color: var(--text-primary);
+      line-height: 1.35;
+    }
+
+    .insight-card p {
+      font-size: var(--small-size);
+      color: var(--text-secondary);
+      line-height: 1.58;
+    }
+
+    .insight-card.compact {
+      padding: 0.85rem 1rem 0.9rem;
+      gap: 0.48rem;
+    }
+
+    .insight-card.compact h3 {
+      font-size: clamp(0.9rem, 1.16vw, 1.02rem);
+      line-height: 1.42;
+    }
+
+    .agent-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.42rem;
+    }
+
+    .agent-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.34rem 0.58rem;
+      border-radius: 999px;
+      border: 1px solid rgba(132, 167, 210, 0.18);
+      background: rgba(255, 255, 255, 0.9);
+      color: var(--text-secondary);
+      font-size: var(--small-size);
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .gallery-shot-frame.focus {
+      padding: 0.6rem;
+      background:
+        radial-gradient(circle at 15% 16%, rgba(130, 194, 255, 0.18), transparent 26%),
+        radial-gradient(circle at 84% 18%, rgba(196, 227, 255, 0.22), transparent 28%),
+        linear-gradient(180deg, rgba(248, 252, 255, 0.98), rgba(233, 242, 252, 0.98));
+    }
+
+    .gallery-shot-frame.focus::after {
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(214, 229, 247, 0.18) 100%);
+    }
+
+    .gallery-shot-image.contain {
+      object-fit: contain;
+      object-position: center center;
+      transform: scale(1);
+      padding: 0.08rem;
+      background: linear-gradient(180deg, #fbfcff 0%, #eef3fb 100%);
+      border-radius: 0.7rem;
+    }
+
+    .gallery-shot-image.crop {
+      object-fit: cover;
+      object-position: var(--shot-position, 50% 50%);
+      transform: scale(var(--shot-scale, 1.3));
+      transform-origin: center center;
+    }
+
+    .gallery-shot-overlay.minimal {
+      justify-content: flex-start;
+      gap: 0;
+      padding: 0.72rem;
+    }
+
+    .gallery-column {
+      display: grid;
+      gap: 0.85rem;
+      align-content: start;
+    }
+
+    .interactive-gallery {
+      --gallery-progress: 25%;
+      --tilt-x: 0;
+      --tilt-y: 0;
+      --glow-x: 50%;
+      --glow-y: 50%;
+      padding: 0.9rem;
+      border-radius: 1.45rem;
+      border: 1px solid rgba(157, 186, 221, 0.16);
+      background:
+        radial-gradient(circle at top left, rgba(130, 194, 255, 0.18), transparent 28%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(233, 242, 252, 0.96));
+      box-shadow: var(--shadow);
+      display: grid;
+      gap: 0.75rem;
+      min-width: 0;
+    }
+
+    .interactive-gallery.agent {
+      background:
+        radial-gradient(circle at top right, rgba(196, 227, 255, 0.24), transparent 30%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(233, 242, 252, 0.96));
+    }
+
+    .gallery-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: flex-start;
+    }
+
+    .gallery-title-group {
+      display: grid;
+      gap: 0.3rem;
+      min-width: 0;
+    }
+
+    .gallery-title-group h3 {
+      font-size: clamp(1rem, 1.4vw, 1.22rem);
+      color: var(--text-primary);
+      line-height: 1.25;
+    }
+
+    .gallery-title-group p {
+      font-size: var(--small-size);
+      color: var(--text-secondary);
+      line-height: 1.55;
+      max-width: 36ch;
+    }
+
+    .gallery-hint {
+      flex-shrink: 0;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding-top: 0.15rem;
+    }
+
+    .gallery-canvas {
+      position: relative;
+      padding: 0.55rem;
+      border-radius: 1.2rem;
+      background:
+        radial-gradient(circle at var(--glow-x) var(--glow-y), rgba(130, 194, 255, 0.18), transparent 32%),
+        rgba(244, 248, 255, 0.96);
+      border: 1px solid rgba(132, 167, 210, 0.16);
+      overflow: hidden;
+      min-height: min(27vh, 260px);
+      perspective: 1200px;
+    }
+
+    .interactive-gallery.agent .gallery-canvas {
+      min-height: min(24vh, 220px);
+      background:
+        radial-gradient(circle at var(--glow-x) var(--glow-y), rgba(196, 227, 255, 0.26), transparent 34%),
+        rgba(244, 248, 255, 0.96);
+    }
+
+    .gallery-canvas::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(130, 194, 255, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(130, 194, 255, 0.06) 1px, transparent 1px);
+      background-size: 1.4rem 1.4rem;
+      opacity: 0.38;
+      pointer-events: none;
+    }
+
+    .gallery-stage {
+      position: relative;
+      height: 100%;
+      border-radius: 1rem;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 32px 60px rgba(0, 0, 0, 0.34);
+      transform:
+        rotateX(calc(var(--tilt-y) * -1deg))
+        rotateY(calc(var(--tilt-x) * 1deg));
+      transform-style: preserve-3d;
+      transition: transform 0.18s ease;
+      min-height: min(24vh, 240px);
+      background: linear-gradient(180deg, #f9fbff 0%, #eef3fb 100%);
+    }
+
+    .interactive-gallery.agent .gallery-stage {
+      min-height: min(21vh, 200px);
+    }
+
+    .gallery-frame {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      transform: translateY(18px) scale(0.985);
+      transition:
+        opacity 0.35s var(--ease-out-expo),
+        transform 0.35s var(--ease-out-expo);
+      pointer-events: none;
+    }
+
+    .gallery-frame.is-active {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+
+    .gallery-progress {
+      position: absolute;
+      left: 0.75rem;
+      right: 0.75rem;
+      bottom: 0.55rem;
+      height: 0.26rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      z-index: 4;
+    }
+
+    .gallery-progress span {
+      display: block;
+      width: var(--gallery-progress);
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--accent-warm));
+      box-shadow: 0 0 18px rgba(102, 174, 245, 0.18);
+      transition: width 0.28s ease;
+    }
+
+    .gallery-track {
+      display: grid;
+      gap: 0.45rem;
+    }
+
+    .mode-gallery-panel[data-gallery-size="4"] .gallery-track {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .mode-gallery-panel[data-gallery-size="2"] .gallery-track {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .interactive-gallery.general .gallery-track {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .interactive-gallery.agent .gallery-track {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .gallery-step {
+      border: 1px solid rgba(132, 167, 210, 0.16);
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 1rem;
+      padding: 0.55rem 0.6rem 0.6rem;
+      text-align: left;
+      cursor: pointer;
+      transition:
+        transform 0.2s ease,
+        border-color 0.2s ease,
+        background 0.2s ease;
+    }
+
+    .gallery-step:hover,
+    .gallery-step:focus-visible {
+      transform: translateY(-1px);
+      border-color: rgba(127, 212, 255, 0.28);
+      outline: none;
+    }
+
+    .gallery-step span {
+      display: block;
+      margin-bottom: 0.16rem;
+      font-size: 0.62rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .gallery-step strong {
+      display: block;
+      font-size: 0.74rem;
+      line-height: 1.35;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    .gallery-step.active {
+      border-color: rgba(130, 194, 255, 0.34);
+      background: rgba(130, 194, 255, 0.14);
+    }
+
+    .interactive-gallery.agent .gallery-step.active {
+      border-color: rgba(130, 194, 255, 0.34);
+      background: rgba(196, 227, 255, 0.22);
+    }
+
+    .gallery-step.active strong {
+      color: var(--text-primary);
+    }
+
+    .gallery-shot-frame {
+      position: relative;
+      height: 100%;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 18% 16%, rgba(130, 194, 255, 0.18), transparent 26%),
+        radial-gradient(circle at 82% 20%, rgba(196, 227, 255, 0.24), transparent 30%),
+        #eef5ff;
+    }
+
+    .gallery-shot-frame::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(224, 236, 249, 0.14) 42%, rgba(199, 217, 238, 0.62) 100%);
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .gallery-shot-image {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+      object-position: var(--shot-position, 50% 12%);
+      transform: scale(1.01);
+    }
+
+    .gallery-shot-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 0.8rem;
+      padding: 0.7rem;
+      pointer-events: none;
+    }
+
+    .gallery-shot-badge {
+      align-self: flex-start;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.38rem;
+      padding: 0.34rem 0.56rem;
+      border-radius: 999px;
+      border: 1px solid rgba(132, 167, 210, 0.18);
+      background: rgba(255, 255, 255, 0.86);
+      color: rgba(21, 56, 95, 0.92);
+      font-size: 0.58rem;
+      font-family: var(--font-mono);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      box-shadow: 0 14px 28px rgba(108, 149, 202, 0.12);
+    }
+
+    .interactive-gallery.agent .gallery-shot-badge {
+      background: rgba(255, 255, 255, 0.86);
+      border-color: rgba(132, 167, 210, 0.18);
+      color: var(--accent-strong);
+    }
+
+    .gallery-shot-copy {
+      width: min(100%, 17.5rem);
+      padding: 0.72rem 0.82rem 0.78rem;
+      border-radius: 1rem;
+      border: 1px solid rgba(132, 167, 210, 0.18);
+      background:
+        linear-gradient(145deg, rgba(255, 255, 255, 0.88), rgba(233, 242, 252, 0.92));
+      box-shadow: 0 20px 42px rgba(108, 149, 202, 0.12);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+
+    .interactive-gallery.agent .gallery-shot-copy {
+      background:
+        linear-gradient(145deg, rgba(255, 255, 255, 0.88), rgba(233, 242, 252, 0.92));
+    }
+
+    .gallery-shot-copy strong {
+      display: block;
+      margin-bottom: 0.28rem;
+      font-size: 0.8rem;
+      line-height: 1.34;
+      color: var(--text-primary);
+    }
+
+    .gallery-shot-copy p {
+      font-size: 0.62rem;
+      line-height: 1.5;
+      color: var(--text-secondary);
+    }
+
+    .demo-shot {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(180deg, #f9fbff 0%, #edf2fb 100%);
+      color: #15243a;
+      overflow: hidden;
+    }
+
+    .demo-browser {
+      display: flex;
+      align-items: center;
+      gap: 0.28rem;
+      padding: 0.38rem 0.55rem;
+      background: rgba(241, 245, 251, 0.96);
+      border-bottom: 1px solid rgba(17, 39, 66, 0.08);
+    }
+
+    .demo-dot {
+      width: 0.42rem;
+      height: 0.42rem;
+      border-radius: 50%;
+      background: #c8d5e8;
+    }
+
+    .demo-dot.warm {
+      background: #f1b971;
+    }
+
+    .demo-dot.cool {
+      background: #7ebdff;
+    }
+
+    .demo-url {
+      margin-left: auto;
+      font-size: 0.52rem;
+      color: #8a98ab;
+      font-family: var(--font-mono);
+    }
+
+    .demo-appbar {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.5rem 0.7rem;
+      background: rgba(255, 255, 255, 0.92);
+      border-bottom: 1px solid rgba(17, 39, 66, 0.08);
+    }
+
+    .demo-appbar-title {
+      font-size: 0.68rem;
+      color: #1d2c43;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .demo-appbar-pill,
+    .demo-appbar-action {
+      font-size: 0.52rem;
+      border-radius: 999px;
+      padding: 0.2rem 0.45rem;
+      background: #eef3fb;
+      color: #748399;
+      white-space: nowrap;
+    }
+
+    .demo-workspace {
+      flex: 1;
+      display: grid;
+      grid-template-columns: minmax(0, 1.64fr) minmax(0, 0.82fr);
+      min-height: 0;
+      background: #ffffff;
+    }
+
+    .demo-editor {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      background: linear-gradient(180deg, #ffffff, #f7f9fe);
+    }
+
+    .demo-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 0.28rem;
+      padding: 0.35rem 0.55rem;
+      border-bottom: 1px solid rgba(17, 39, 66, 0.08);
+      background: rgba(251, 252, 255, 0.95);
+    }
+
+    .demo-tool {
+      width: 0.65rem;
+      height: 0.65rem;
+      border-radius: 0.2rem;
+      background: #d5e0ee;
+    }
+
+    .demo-tool.long {
+      width: 1.4rem;
+    }
+
+    .demo-editor-body {
+      flex: 1;
+      padding: 0.68rem 0.78rem;
+      min-height: 0;
+      position: relative;
+    }
+
+    .demo-empty-stage {
+      width: 100%;
+      height: 100%;
+      border-radius: 0.95rem;
+      background:
+        linear-gradient(180deg, rgba(245, 248, 254, 0.7), rgba(255, 255, 255, 0)),
+        radial-gradient(circle at 20% 20%, rgba(126, 189, 255, 0.1), transparent 20%);
+      border: 1px dashed rgba(17, 39, 66, 0.08);
+    }
+
+    .demo-doc-title {
+      width: 62%;
+      height: 0.72rem;
+      border-radius: 999px;
+      background: #86baf3;
+      margin-bottom: 0.55rem;
+    }
+
+    .demo-doc-block {
+      display: grid;
+      gap: 0.2rem;
+      margin-bottom: 0.58rem;
+    }
+
+    .demo-doc-heading {
+      width: 42%;
+      height: 0.52rem;
+      border-radius: 999px;
+      background: #5f9fe8;
+      opacity: 0.9;
+    }
+
+    .demo-line {
+      display: block;
+      height: 0.22rem;
+      border-radius: 999px;
+      background: #cdd9e8;
+    }
+
+    .demo-line.dark {
+      background: #9badc3;
+    }
+
+    .demo-sidebar {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      border-left: 1px solid rgba(17, 39, 66, 0.08);
+      background: linear-gradient(180deg, #f9fbff, #f2f6fd);
+    }
+
+    .demo-side-tabs {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      border-bottom: 1px solid rgba(17, 39, 66, 0.08);
+    }
+
+    .demo-side-tabs span {
+      text-align: center;
+      font-size: 0.52rem;
+      padding: 0.46rem 0.2rem;
+      color: #7d8aa0;
+    }
+
+    .demo-side-tabs span.active {
+      color: #376ef6;
+      background: rgba(76, 143, 255, 0.08);
+      box-shadow: inset 0 -2px 0 #376ef6;
+    }
+
+    .demo-side-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.42rem;
+      padding: 0.5rem;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .demo-bubble {
+      align-self: flex-end;
+      max-width: 76%;
+      padding: 0.42rem 0.55rem;
+      border-radius: 0.75rem;
+      font-size: 0.52rem;
+      line-height: 1.35;
+      box-shadow: 0 8px 22px rgba(17, 39, 66, 0.08);
+    }
+
+    .demo-bubble.user {
+      background: linear-gradient(135deg, #3f7dff, #5a9cff);
+      color: #ffffff;
+    }
+
+    .demo-bubble.assist {
+      align-self: stretch;
+      background: #ffffff;
+      color: #4d5d74;
+      border: 1px solid rgba(17, 39, 66, 0.08);
+    }
+
+    .demo-panel-card {
+      background: #ffffff;
+      border: 1px solid rgba(17, 39, 66, 0.08);
+      border-radius: 0.95rem;
+      padding: 0.55rem;
+      box-shadow: 0 14px 30px rgba(17, 39, 66, 0.08);
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    .demo-panel-title {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-size: 0.54rem;
+      color: #1b2d47;
+      font-weight: 600;
+    }
+
+    .demo-avatar {
+      width: 0.72rem;
+      height: 0.72rem;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #ffd5da, #a6c8ff);
+      flex-shrink: 0;
+    }
+
+    .demo-subtitle {
+      font-size: 0.48rem;
+      color: #8b97ab;
+      line-height: 1.35;
+    }
+
+    .demo-loader {
+      display: flex;
+      justify-content: center;
+      gap: 0.22rem;
+      padding: 0.3rem 0 0.12rem;
+    }
+
+    .demo-loader span {
+      width: 0.24rem;
+      height: 0.24rem;
+      border-radius: 50%;
+      background: #5087ff;
+      opacity: 0.7;
+      animation: pulseDots 1.2s ease-in-out infinite;
+    }
+
+    .demo-loader span:nth-child(2) {
+      animation-delay: 0.18s;
+    }
+
+    .demo-loader span:nth-child(3) {
+      animation-delay: 0.36s;
+    }
+
+    .demo-outline-card {
+      background: #ffffff;
+      border: 1px solid rgba(17, 39, 66, 0.08);
+      border-radius: 0.85rem;
+      padding: 0.45rem;
+      display: grid;
+      gap: 0.3rem;
+    }
+
+    .demo-outline-card strong,
+    .demo-list-title {
+      font-size: 0.5rem;
+      color: #445773;
+      font-weight: 600;
+    }
+
+    .demo-outline-item {
+      display: flex;
+      gap: 0.32rem;
+      font-size: 0.46rem;
+      line-height: 1.35;
+      color: #5b6c84;
+    }
+
+    .demo-outline-item span:first-child {
+      color: #7d8aa0;
+      width: 0.6rem;
+      flex-shrink: 0;
+    }
+
+    .demo-process-block {
+      background: #ffffff;
+      border: 1px solid rgba(17, 39, 66, 0.08);
+      border-radius: 1rem;
+      padding: 0.6rem;
+      display: grid;
+      gap: 0.3rem;
+      box-shadow: 0 16px 32px rgba(17, 39, 66, 0.08);
+    }
+
+    .demo-process-block strong {
+      font-size: 0.52rem;
+      color: #21344f;
+    }
+
+    .demo-process-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.38rem;
+      font-size: 0.46rem;
+      line-height: 1.36;
+      color: #53647c;
+    }
+
+    .demo-process-step b {
+      width: 0.7rem;
+      color: #2f5ddb;
+      flex-shrink: 0;
+    }
+
+    .demo-input {
+      margin-top: auto;
+      border: 1px solid rgba(17, 39, 66, 0.08);
+      border-radius: 0.75rem;
+      padding: 0.38rem 0.5rem;
+      background: rgba(255, 255, 255, 0.92);
+      font-size: 0.48rem;
+      color: #97a5b9;
+    }
+
+    .demo-floating-chip {
+      position: absolute;
+      bottom: 0.65rem;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 0.32rem 0.62rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.92);
+      color: #2c5e9f;
+      font-size: 0.5rem;
+      box-shadow: 0 16px 34px rgba(108, 149, 202, 0.12);
+    }
+
+    .demo-status-list {
+      display: grid;
+      gap: 0.3rem;
+    }
+
+    .demo-status {
+      display: flex;
+      align-items: center;
+      gap: 0.34rem;
+      padding: 0.45rem 0.52rem;
+      border-radius: 0.85rem;
+      background: rgba(93, 190, 255, 0.08);
+      border: 1px solid rgba(93, 190, 255, 0.22);
+      color: #3862d9;
+      font-size: 0.5rem;
+    }
+
+    .demo-status.done {
+      background: rgba(110, 215, 172, 0.12);
+      border-color: rgba(93, 213, 170, 0.22);
+      color: #1c7f5b;
+    }
+
+    .demo-status-badge {
+      width: 0.72rem;
+      height: 0.72rem;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #73bcff, #d4e6ff);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #ffffff;
+      font-size: 0.48rem;
+      flex-shrink: 0;
+    }
+
+    .demo-side-scroll {
+      display: grid;
+      gap: 0.32rem;
+      max-height: 100%;
+      overflow: hidden;
+    }
+
+    .demo-document-card {
+      background: #ffffff;
+      border: 1px solid rgba(17, 39, 66, 0.08);
+      border-radius: 0.85rem;
+      padding: 0.5rem;
+      box-shadow: 0 16px 32px rgba(17, 39, 66, 0.08);
+    }
+
+    .demo-document-card strong {
+      display: block;
+      font-size: 0.54rem;
+      color: #22344e;
+      margin-bottom: 0.28rem;
+    }
+
+    .demo-document-card p {
+      font-size: 0.46rem;
+      line-height: 1.4;
+      color: #5d6d83;
+    }
+
+    .demo-output-pane {
+      border-radius: 0.95rem;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 249, 255, 0.95));
+      border: 1px solid rgba(17, 39, 66, 0.08);
+      padding: 0.7rem;
+      box-shadow: 0 16px 30px rgba(17, 39, 66, 0.06);
+    }
+
+    .demo-output-pane h4 {
+      font-size: 0.68rem;
+      color: #1c2d47;
+      margin-bottom: 0.45rem;
+    }
+
+    .demo-output-pane .demo-doc-heading {
+      margin-bottom: 0.38rem;
+      width: 48%;
+    }
+
+    @keyframes pulseDots {
+      0%,
+      100% {
+        opacity: 0.35;
+        transform: translateY(0);
+      }
+
+      50% {
+        opacity: 1;
+        transform: translateY(-1px);
+      }
     }
 
     .progress-track {
@@ -715,7 +1815,7 @@
       left: 0;
       width: 100%;
       height: 4px;
-      background: rgba(255, 255, 255, 0.08);
+      background: rgba(130, 194, 255, 0.12);
       z-index: 50;
     }
 
@@ -743,7 +1843,7 @@
       height: 0.72rem;
       border-radius: 50%;
       border: none;
-      background: rgba(255, 255, 255, 0.2);
+      background: rgba(130, 194, 255, 0.22);
       cursor: pointer;
       transition: transform 0.25s ease, background 0.25s ease;
     }
@@ -763,8 +1863,8 @@
       gap: 0.8rem;
       padding: 0.65rem 0.95rem;
       border-radius: 999px;
-      background: rgba(7, 17, 31, 0.76);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(132, 167, 210, 0.16);
       color: var(--text-secondary);
       font-family: var(--font-mono);
       font-size: var(--small-size);
@@ -829,6 +1929,22 @@
       .slide-image {
         max-height: min(40vh, 320px);
       }
+
+      .gallery-shot-overlay {
+        padding: 0.55rem;
+      }
+
+      .gallery-shot-copy {
+        width: min(100%, 15rem);
+      }
+
+      .mode-gallery-panel .gallery-canvas {
+        min-height: min(42vh, 360px);
+      }
+
+      .mode-gallery-panel .gallery-stage {
+        min-height: min(37vh, 320px);
+      }
     }
 
     @media (max-height: 600px) {
@@ -853,6 +1969,18 @@
       .timeline-card {
         border-radius: 1rem;
       }
+
+      .gallery-shot-copy {
+        padding: 0.62rem 0.72rem;
+      }
+
+      .gallery-shot-copy p {
+        display: none;
+      }
+
+      .insight-card {
+        padding: 0.8rem 0.85rem;
+      }
     }
 
     @media (max-height: 500px) {
@@ -872,7 +2000,10 @@
     @media (max-width: 980px) {
       .hero,
       .split-grid,
-      .closing-panel {
+      .closing-panel,
+      .dual-stage-grid,
+      .mode-focus-grid,
+      .value-mode-grid {
         grid-template-columns: 1fr;
       }
 
@@ -882,6 +2013,16 @@
 
       .scenario-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .mode-gallery-panel.agent {
+        max-width: min(100%, 26rem);
+        margin-inline: auto;
+      }
+
+      .agent-layout .mode-insight-column {
+        max-width: none;
+        justify-self: stretch;
       }
     }
 
@@ -899,6 +2040,34 @@
       .timeline,
       .scenario-grid {
         grid-template-columns: 1fr;
+      }
+
+      .gallery-head {
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+
+      .gallery-hint {
+        display: none;
+      }
+
+      .interactive-gallery.general .gallery-track,
+      .interactive-gallery.agent .gallery-track,
+      .mode-gallery-panel[data-gallery-size="4"] .gallery-track,
+      .mode-gallery-panel[data-gallery-size="2"] .gallery-track {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .gallery-shot-copy {
+        width: 100%;
+      }
+
+      .mode-gallery-panel .gallery-canvas {
+        min-height: min(38vh, 320px);
+      }
+
+      .mode-gallery-panel .gallery-stage {
+        min-height: min(34vh, 280px);
       }
 
       .hero-art {
@@ -928,6 +2097,10 @@
       .reveal {
         transform: none;
       }
+
+      .gallery-stage {
+        transform: none !important;
+      }
     }
   </style>
 </head>
@@ -952,7 +2125,7 @@
             <h1 class="reveal">新星 Writing Studio</h1>
             <p class="lead reveal">
               面向政企与专业写作场景的智能写作产品，把<span class="accent">通用写作智能体</span>、
-              <span class="accent">指定写作智能体</span>与<span class="accent">Deep Research RAG</span>
+              <span class="accent">指定写作智能体</span>与<span class="accent">Deep Research</span>
               融合进同一工作台，覆盖从研究、起稿、生成到改写的完整链路。
             </p>
             <div class="tag-row reveal">
@@ -961,7 +2134,7 @@
                 <span>开放式探索 + 专属流程执行</span>
               </div>
               <div class="chip">
-                <strong>Deep Research RAG</strong>
+                <strong>Deep Research</strong>
                 <span>多轮递进研究，不止一次召回</span>
               </div>
               <div class="chip">
@@ -987,7 +2160,7 @@
 
           <div class="hero-art reveal" aria-hidden="true">
             <div class="orbit-panel top">
-              <div class="label-pill">General Mode</div>
+              <div class="label-pill">通用写作模式</div>
               <h3>通用写作智能体</h3>
               <p>深度研究、动态大纲、分步生成，适合开放式专业写作。</p>
             </div>
@@ -997,7 +2170,7 @@
               <p>围绕问题拆解、检索、校验与结构化输出形成闭环。</p>
             </div>
             <div class="orbit-panel mid">
-              <div class="label-pill">Agent Mode</div>
+              <div class="label-pill">指定AF智能体模式</div>
               <h3>指定写作智能体</h3>
               <p>基于 AF 平台低代码构建，逻辑、参数、记忆都可自定义。</p>
             </div>
@@ -1061,7 +2234,7 @@
             </div>
             <div class="flow-node">
               <strong>执行层</strong>
-              <span>通用写作智能体、指定写作智能体、Deep Research RAG、Copilot 协同编辑。</span>
+              <span>通用写作智能体、指定写作智能体、Deep Research、Copilot 协同编辑。</span>
             </div>
             <div class="flow-node">
               <strong>产出层</strong>
@@ -1090,46 +2263,234 @@
       </div>
     </section>
 
-    <section class="slide" data-title="双模式写作">
+    <section class="slide" data-title="双模式价值">
       <div class="slide-content">
         <div class="slide-shell">
           <div class="section-header">
-            <div class="eyebrow reveal">Core Differentiator</div>
-            <h2 class="reveal">最大的产品特征：通用写作智能体 + 指定写作智能体</h2>
+            <div class="eyebrow reveal">双模式价值</div>
+            <h2 class="reveal">同一产品，同时承接开放探索与标准执行两类写作需求</h2>
             <p class="lead reveal">
-              同一入口承接两种完全不同的写作方式，既能解决开放式复杂写作，也能承接组织专属、强约束的定制流程。
+              新星 Writing Studio 不是让一个模式硬撑所有任务，而是把“先研究再写”和“按规则直接执行”放进同一工作台，让不同写作诉求都能找到最合适的路径。
             </p>
           </div>
 
-          <div class="stack-grid">
-            <article class="mode-card primary reveal">
-              <div class="label-pill">Mode A</div>
-              <h3>通用写作智能体</h3>
+          <div class="value-mode-grid">
+            <article class="need-card value-card reveal">
+              <div class="label-pill">通用写作模式</div>
+              <h3>满足复杂主题、模糊命题和需要论证支撑的开放式写作</h3>
               <ul class="feature-list">
-                <li>面向模糊主题与复杂需求，适合从 0 到 1 的长文创作。</li>
-                <li>联动知识库、上传文件、上下文，自动规划动态大纲。</li>
-                <li>支持分步生成与一次性生成，兼顾深度文本与轻量文本。</li>
-                <li>天然接入 Deep Research RAG，为内容深度与论证提供支撑。</li>
+                <li>从空白页开始也能先理解任务、拆解问题，再逐步形成大纲和正文。</li>
+                <li>联动 Deep Research、知识库、附件与上下文，让内容建立在研究基础上。</li>
+                <li>适合报告、分析、专题研究、综合材料等高复杂度长文任务。</li>
               </ul>
             </article>
 
-            <article class="mode-card secondary reveal">
-              <div class="label-pill warm">Mode B</div>
-              <h3>指定写作智能体</h3>
+            <article class="need-card value-card warm reveal">
+              <div class="label-pill warm">指定AF智能体模式</div>
+              <h3>满足规则明确、流程固定、需要稳定复用的标准化写作</h3>
               <ul class="feature-list">
-                <li>依托 AF 低代码智能体开发平台，用户可搭建独一无二的写作智能体。</li>
-                <li>支持自主规划型与工作流型智能体，匹配不同业务执行方式。</li>
-                <li>参数、记忆、输出逻辑可映射到写作端，逻辑与结果都可控。</li>
-                <li>面向组织内部规范、行业方法论和专属知识沉淀，打造个性化生产力。</li>
+                <li>把组织模板、参数逻辑、知识沉淀和审批规则封装成可直接调用的能力。</li>
+                <li>按既定工作流连续执行，过程可见、结果稳定，适合高频业务任务。</li>
+                <li>适用于周报日报、招投标材料、行业表单化报告等强约束场景。</li>
               </ul>
             </article>
           </div>
 
-          <div class="quote-card reveal">
-            <p>
-              同一个工作台里，用户可以先用通用写作智能体完成深度研究与开放探索，再切入指定写作智能体执行组织专属流程，
-              形成“通用能力 + 专属能力”协同的完整写作体系。
+          <div class="dual-bridge reveal">
+            <strong>先用通用模式完成研究起稿，再用指定AF智能体模式承接标准流程。</strong>
+            <p>双模式的价值不在于提供两个入口，而在于让探索能力与专属流程能力在同一个写作闭环里自然衔接。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="通用写作模式">
+      <div class="slide-content">
+        <div class="slide-shell">
+          <div class="section-header">
+            <div class="eyebrow reveal">通用写作模式</div>
+            <h2 class="reveal">从空白需求到流式成文，适合需要先研究再写的复杂任务</h2>
+            <p class="lead reveal">
+              通用写作模式把理解任务、生成大纲、深度思考和全文输出串成一个连续过程，用户既能看到过程，也能随时接管内容。
             </p>
+          </div>
+
+          <div class="mode-focus-grid">
+            <article class="interactive-gallery mode-gallery-panel reveal" data-gallery-size="4" data-gallery-default="0">
+              <div class="gallery-canvas">
+                <div class="gallery-stage">
+                  <figure class="gallery-frame is-active" data-frame-index="0" aria-label="通用写作初始状态">
+                    <div class="gallery-shot-frame focus">
+                      <img
+                        src="./assets/general-start.png"
+                        alt="通用写作初始状态"
+                        class="gallery-shot-image contain"
+                      >
+                      <div class="gallery-shot-overlay minimal">
+                        <div class="gallery-shot-badge">第1步 / 初始状态</div>
+                      </div>
+                    </div>
+                  </figure>
+
+                  <figure class="gallery-frame" data-frame-index="1" aria-label="通用写作大纲阶段">
+                    <div class="gallery-shot-frame focus">
+                      <img
+                        src="./assets/general-outline.png"
+                        alt="通用写作大纲阶段"
+                        class="gallery-shot-image contain"
+                      >
+                      <div class="gallery-shot-overlay minimal">
+                        <div class="gallery-shot-badge">第2步 / 大纲阶段</div>
+                      </div>
+                    </div>
+                  </figure>
+
+                  <figure class="gallery-frame" data-frame-index="2" aria-label="通用写作全文生成前的思考过程">
+                    <div class="gallery-shot-frame focus">
+                      <img
+                        src="./assets/general-thinking.png"
+                        alt="通用写作全文生成前的思考过程"
+                        class="gallery-shot-image contain"
+                      >
+                      <div class="gallery-shot-overlay minimal">
+                        <div class="gallery-shot-badge">第3步 / 思考生成</div>
+                      </div>
+                    </div>
+                  </figure>
+
+                  <figure class="gallery-frame" data-frame-index="3" aria-label="通用写作流式输出全文">
+                    <div class="gallery-shot-frame focus">
+                      <img
+                        src="./assets/general-streaming.png"
+                        alt="通用写作流式输出全文"
+                        class="gallery-shot-image contain"
+                      >
+                      <div class="gallery-shot-overlay minimal">
+                        <div class="gallery-shot-badge">第4步 / 流式成文</div>
+                      </div>
+                    </div>
+                  </figure>
+                </div>
+                <div class="gallery-progress" aria-hidden="true"><span></span></div>
+              </div>
+
+              <div class="gallery-track" aria-label="通用写作状态">
+                <button class="gallery-step active" type="button" data-step-index="0">
+                  <span>第1步</span>
+                  <strong>初始状态</strong>
+                </button>
+                <button class="gallery-step" type="button" data-step-index="1">
+                  <span>第2步</span>
+                  <strong>大纲阶段</strong>
+                </button>
+                <button class="gallery-step" type="button" data-step-index="2">
+                  <span>第3步</span>
+                  <strong>思考生成</strong>
+                </button>
+                <button class="gallery-step" type="button" data-step-index="3">
+                  <span>第4步</span>
+                  <strong>流式成文</strong>
+                </button>
+              </div>
+            </article>
+
+            <div class="mode-insight-column">
+              <article class="insight-card reveal">
+                <div class="label-pill">解决什么问题</div>
+                <h3>适合面对复杂主题时，先搞清楚再动笔</h3>
+                <p>当需求模糊、材料分散、结构尚未成形时，通用写作模式会先组织研究路径，再进入写作过程。</p>
+              </article>
+
+              <article class="insight-card reveal">
+                <div class="label-pill">用户获得什么</div>
+                <h3>看得见思考、看得见结构、也看得见正文持续成形</h3>
+                <p>关键阶段被完整透明化，复杂度高的写作不再是“难以下笔”，而是可以沿着研究路径持续推进。</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="指定AF智能体模式">
+      <div class="slide-content">
+        <div class="slide-shell agent-mode-shell">
+          <div class="section-header">
+            <div class="eyebrow reveal">指定AF智能体模式</div>
+            <h2 class="reveal">把组织自己的规则和流程，<br>直接变成可执行的写作能力</h2>
+            <p class="lead reveal">
+              指定AF智能体模式更适合标准化、高频次、强约束任务。用户不必重复描述流程，直接调用沉淀好的专属智能体即可完成执行。
+            </p>
+          </div>
+
+          <div class="mode-focus-grid agent-layout">
+            <article class="interactive-gallery mode-gallery-panel agent reveal" data-gallery-size="2" data-gallery-default="0">
+              <div class="gallery-canvas">
+                <div class="gallery-stage">
+                  <figure class="gallery-frame is-active" data-frame-index="0" aria-label="指定AF智能体执行过程">
+                    <div class="gallery-shot-frame focus">
+                      <img
+                        src="./assets/workflow-running.png"
+                        alt="指定AF智能体执行过程"
+                        class="gallery-shot-image contain"
+                      >
+                      <div class="gallery-shot-overlay minimal">
+                        <div class="gallery-shot-badge">第1步 / 执行过程</div>
+                      </div>
+                    </div>
+                  </figure>
+
+                  <figure class="gallery-frame" data-frame-index="1" aria-label="指定AF智能体输出效果">
+                    <div class="gallery-shot-frame focus">
+                      <img
+                        src="./assets/workflow-output.png"
+                        alt="指定AF智能体输出效果"
+                        class="gallery-shot-image contain"
+                      >
+                      <div class="gallery-shot-overlay minimal">
+                        <div class="gallery-shot-badge">第2步 / 输出效果</div>
+                      </div>
+                    </div>
+                  </figure>
+                </div>
+                <div class="gallery-progress" aria-hidden="true"><span></span></div>
+              </div>
+
+              <div class="gallery-track" aria-label="指定AF智能体状态">
+                <button class="gallery-step active" type="button" data-step-index="0">
+                  <span>第1步</span>
+                  <strong>执行过程</strong>
+                </button>
+                <button class="gallery-step" type="button" data-step-index="1">
+                  <span>第2步</span>
+                  <strong>输出效果</strong>
+                </button>
+              </div>
+            </article>
+
+            <div class="mode-insight-column">
+              <article class="insight-card warm compact reveal">
+                <div class="label-pill warm">最终沉淀什么</div>
+                <h3>把一次执行，沉淀为三类可以长期复用的组织资产</h3>
+                <div class="agent-chip-row" aria-label="组织资产">
+                  <span class="agent-chip">规则模板</span>
+                  <span class="agent-chip">节点状态</span>
+                  <span class="agent-chip">标准产出</span>
+                </div>
+              </article>
+
+              <article class="insight-card warm reveal">
+                <div class="label-pill warm">适合什么任务</div>
+                <h3>标准模板明确、流程节点固定、需要稳定复用的写作任务</h3>
+                <p>例如工作流报告、行业模板文档、组织内部标准材料等，不再依赖每次重新描述规则。</p>
+              </article>
+
+              <article class="insight-card warm reveal">
+                <div class="label-pill warm">价值点</div>
+                <h3>不是黑盒生成，而是把组织经验沉淀成可追踪、可复用的执行能力</h3>
+                <p>每一步状态都直接可见，执行完成后结果自然回到工作台，让专属方法论真正沉淀为稳定生产效率。</p>
+              </article>
+            </div>
           </div>
         </div>
       </div>
@@ -1140,7 +2501,7 @@
         <div class="slide-shell split-grid">
           <div class="section-header">
             <div class="eyebrow reveal">Knowledge Engine</div>
-            <h2 class="reveal">知识检索不是简单 RAG，而是 Deep Research RAG</h2>
+            <h2 class="reveal">知识检索不是简单 RAG，而是 Deep Research</h2>
             <p class="lead reveal">
               真实产品的知识引擎不是“一次提问、一次召回”的线性检索，而是以 Deep Research 为核心的多轮递进研究机制。
             </p>
@@ -1170,7 +2531,7 @@
           </div>
 
           <div class="panel reveal">
-            <div class="label-pill warm">Deep Research RAG</div>
+            <div class="label-pill warm">Deep Research</div>
             <h3>把“找到信息”升级为“形成判断”</h3>
             <ul class="feature-list">
               <li>统一联动当前挂载知识库、上传文件与历史上下文。</li>
@@ -1232,7 +2593,7 @@
         <div class="slide-shell split-grid">
           <figure class="image-panel reveal">
             <img
-              src="./assets/product-home.jpg"
+              src="./assets/workbench-home-20260318.png"
               alt="写作工作台首页界面"
               class="slide-image screenshot"
             >
@@ -1387,7 +2748,7 @@
             </article>
             <article class="card reveal">
               <h3>市场研究报告</h3>
-              <p>借助 Deep Research RAG 完成趋势研判、数据论证与结构化成稿。</p>
+              <p>借助 Deep Research 完成趋势研判、数据论证与结构化成稿。</p>
             </article>
             <article class="card reveal">
               <h3>周报日报</h3>
@@ -1433,7 +2794,7 @@
                 <span>借助 AF 低代码平台搭建专属能力，所有逻辑都能自己掌控。</span>
               </div>
               <div class="summary-item">
-                <strong>Deep Research RAG</strong>
+                <strong>Deep Research</strong>
                 <span>让知识检索从简单召回，升级为真正服务写作判断与论证的研究引擎。</span>
               </div>
             </div>
@@ -1607,7 +2968,81 @@
       }
     }
 
+    class HoverStageGallery {
+      constructor(element) {
+        this.element = element;
+        this.frames = Array.from(element.querySelectorAll(".gallery-frame"));
+        this.steps = Array.from(element.querySelectorAll(".gallery-step"));
+        this.canvas = element.querySelector(".gallery-canvas");
+        this.stage = element.querySelector(".gallery-stage");
+        this.count = this.frames.length;
+        this.prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const defaultIndex = Number(element.dataset.galleryDefault || 0);
+        this.activeIndex = Number.isNaN(defaultIndex) ? 0 : Math.max(0, Math.min(defaultIndex, this.count - 1));
+
+        this.bind();
+        this.setActive(this.activeIndex);
+      }
+
+      bind() {
+        if (!this.canvas || !this.stage || !this.count) {
+          return;
+        }
+
+        this.canvas.addEventListener("pointermove", (event) => {
+          const rect = this.canvas.getBoundingClientRect();
+          const ratioX = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 0.999);
+          const ratioY = Math.min(Math.max((event.clientY - rect.top) / rect.height, 0), 1);
+          const nextIndex = Math.min(Math.floor(ratioX * this.count), this.count - 1);
+
+          this.element.style.setProperty("--glow-x", `${ratioX * 100}%`);
+          this.element.style.setProperty("--glow-y", `${ratioY * 100}%`);
+
+          if (!this.prefersReducedMotion) {
+            const tiltX = (ratioX - 0.5) * 8;
+            const tiltY = (ratioY - 0.5) * 6;
+            this.element.style.setProperty("--tilt-x", tiltX.toFixed(2));
+            this.element.style.setProperty("--tilt-y", tiltY.toFixed(2));
+          }
+
+          if (nextIndex !== this.activeIndex) {
+            this.setActive(nextIndex);
+          }
+        });
+
+        this.canvas.addEventListener("pointerleave", () => {
+          this.element.style.setProperty("--tilt-x", "0");
+          this.element.style.setProperty("--tilt-y", "0");
+        });
+
+        this.steps.forEach((step) => {
+          step.addEventListener("click", () => {
+            const index = Number(step.dataset.stepIndex || 0);
+            this.setActive(index);
+          });
+        });
+      }
+
+      setActive(index) {
+        this.activeIndex = index;
+        this.frames.forEach((frame, frameIndex) => {
+          frame.classList.toggle("is-active", frameIndex === index);
+        });
+
+        this.steps.forEach((step, stepIndex) => {
+          step.classList.toggle("active", stepIndex === index);
+          step.setAttribute("aria-pressed", stepIndex === index ? "true" : "false");
+        });
+
+        const progress = this.count === 1 ? 100 : ((index + 1) / this.count) * 100;
+        this.element.style.setProperty("--gallery-progress", `${progress}%`);
+      }
+    }
+
     new SlidePresentation();
+    document.querySelectorAll(".interactive-gallery").forEach((gallery) => {
+      new HoverStageGallery(gallery);
+    });
   </script>
 </body>
 </html>

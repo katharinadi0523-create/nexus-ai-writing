@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Mode, WritingState, getNextState, isValidTransition } from '../types/writing';
-import { getActiveScenarioData } from '../constants/mockData';
+import { getActiveScenarioData } from '../constants/scenarioData';
 import { InputArea } from './InputArea';
 import { ThinkingAnimation } from './ThinkingAnimation';
 import { OutlineConfirm } from './OutlineConfirm';

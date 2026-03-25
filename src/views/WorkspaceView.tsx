@@ -7,13 +7,14 @@ import type {
   CopilotResponse,
   PendingCopilotEdit,
 } from '../types/copilot';
-import { mockDataStore, ScenarioId, setActiveScenarioId } from '../constants/mockData';
+import { scenarioStore, ScenarioId, setActiveScenarioId } from '../constants/scenarioData';
 import { Editor } from '../components/Editor';
 import type { RewriteType } from '../components/RewriteWindow';
 import { CopilotSidebar } from '../components/CopilotSidebar';
 import { ArrowLeft, Edit2 } from 'lucide-react';
 import { getTask, updateTask } from '../utils/taskStore';
 import type { Task } from '../utils/taskStore';
+import { stripSourceSupTags } from '../utils/contentSanitizer';
 import { streamAgent } from '../services/agentClient';
 import { queryCopilotWithQwen } from '../services/copilotClient';
 import { rewriteWithQwen } from '../services/qwenClient';
@@ -221,6 +222,14 @@ const appendMessage = (
   return [...messages, nextMessage];
 };
 
+const isAbortError = (error: unknown): boolean => {
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return true;
+  }
+
+  return error instanceof Error && /abort/i.test(error.message);
+};
+
 const createDocumentId = () => `doc_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
 const EDIT_INTENT_PATTERN =
@@ -361,7 +370,10 @@ const predictCopilotIntent = (query: string): CopilotProgressIntent => {
 
 const buildInitialDocuments = (task: Task | null): WritingDocument[] => {
   if (task?.documents?.length) {
-    return task.documents;
+    return task.documents.map((document) => ({
+      ...document,
+      content: stripSourceSupTags(document.content || ''),
+    }));
   }
 
   if (!task?.content?.trim()) {
@@ -372,7 +384,7 @@ const buildInitialDocuments = (task: Task | null): WritingDocument[] => {
     {
       id: 'doc_legacy',
       title: task.documentName || '新文档_1',
-      content: task.content,
+      content: stripSourceSupTags(task.content),
       prompt: task.input,
       createdAt: task.updatedAt || task.createdAt || Date.now(),
       status: task.writingState === WritingState.GENERATING ? 'generating' : 'finished',
@@ -429,7 +441,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const [documents, setDocuments] = useState<WritingDocument[]>(initialDocuments);
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(initialActiveDocumentId);
   const [content, setContent] = useState<string>(
-    initialActiveDocument?.content ?? initialTask?.content ?? ''
+    stripSourceSupTags(initialActiveDocument?.content ?? initialTask?.content ?? '')
   );
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [thinkingPhase, setThinkingPhase] = useState<ThinkingPhase>(null);
@@ -462,34 +474,43 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const articleRequestSeqRef = useRef(0);
   const articleStreamRef = useRef(0);
   const thinkingRequestSeqRef = useRef(0);
+  const outlineAbortControllerRef = useRef<AbortController | null>(null);
+  const thinkingAbortControllerRef = useRef<AbortController | null>(null);
+  const generationAbortControllerRef = useRef<AbortController | null>(null);
+  const activeGenerationRef = useRef<{ documentId: string; mode: Mode } | null>(null);
   const copilotProgressTimerRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
 
-  const scenarioData = currentScenarioId ? mockDataStore[currentScenarioId] || null : null;
+  const scenarioData = currentScenarioId ? scenarioStore[currentScenarioId] || null : null;
   const activeDocument =
     documents.find((document) => document.id === activeDocumentId) || null;
   const canExport =
     activeDocument?.status === 'finished' && content.trim().length > 0;
 
   const loadDocumentIntoEditor = useCallback((document: WritingDocument | null) => {
-    setContent(document?.content || '');
+    setContent(stripSourceSupTags(document?.content || ''));
     setDocumentName(document?.title || '新文档_1');
   }, []);
 
   const applyDocumentPatch = useCallback(
     (documentId: string, patch: Partial<WritingDocument>) => {
+      const normalizedPatch =
+        patch.content !== undefined
+          ? { ...patch, content: stripSourceSupTags(patch.content) }
+          : patch;
+
       setDocuments((prev) =>
         prev.map((document) =>
-          document.id === documentId ? { ...document, ...patch } : document
+          document.id === documentId ? { ...document, ...normalizedPatch } : document
         )
       );
 
       if (activeDocumentIdRef.current === documentId) {
-        if (patch.content !== undefined) {
-          setContent(patch.content);
+        if (normalizedPatch.content !== undefined) {
+          setContent(normalizedPatch.content);
         }
-        if (patch.title !== undefined) {
-          setDocumentName(patch.title);
+        if (normalizedPatch.title !== undefined) {
+          setDocumentName(normalizedPatch.title);
         }
       }
     },
@@ -512,7 +533,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       const nextDocument: WritingDocument = {
         id: documentId,
         title,
-        content: documentContent,
+        content: stripSourceSupTags(documentContent),
         prompt,
         createdAt: Date.now(),
         status,
@@ -598,6 +619,89 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     return null;
   }, []);
 
+  const abortActiveWriteRequests = useCallback(() => {
+    outlineAbortControllerRef.current?.abort();
+    outlineAbortControllerRef.current = null;
+    thinkingAbortControllerRef.current?.abort();
+    thinkingAbortControllerRef.current = null;
+    generationAbortControllerRef.current?.abort();
+    generationAbortControllerRef.current = null;
+  }, []);
+
+  const invalidateActiveWriteRequests = useCallback(() => {
+    generalRequestSeqRef.current += 1;
+    articleRequestSeqRef.current += 1;
+    articleStreamRef.current += 1;
+    thinkingRequestSeqRef.current += 1;
+  }, []);
+
+  const handleStopGeneration = useCallback(() => {
+    const generationTarget =
+      (activeGenerationRef.current?.documentId
+        ? documents.find((document) => document.id === activeGenerationRef.current?.documentId)
+        : null) || documents.find((document) => document.status === 'generating') || null;
+    const currentContent =
+      generationTarget?.content ??
+      (activeDocumentIdRef.current && activeDocumentIdRef.current === generationTarget?.id
+        ? content
+        : '');
+    const preservedContent = stripSourceSupTags(currentContent).trim();
+    const hasPreservedContent = preservedContent.length > 0;
+
+    invalidateActiveWriteRequests();
+    abortActiveWriteRequests();
+    activeGenerationRef.current = null;
+    setIsGenerating(false);
+    setPendingCopilotEdit(null);
+    setThinkingPhase(null);
+    setThinkingStatus('idle');
+    setThinkingContent('');
+
+    if (writingState === WritingState.GENERATING) {
+      if (generationTarget?.id && hasPreservedContent) {
+        const nextTitle = extractFirstH1Title(preservedContent);
+        applyDocumentPatch(generationTarget.id, {
+          status: 'finished',
+          errorMessage: undefined,
+          ...(nextTitle ? { title: nextTitle } : {}),
+        });
+        setWritingState(WritingState.FINISHED);
+        setMessages((prev) => [...prev, { role: 'ai', content: '已停止生成，并保留当前已生成内容。' }]);
+        return;
+      }
+
+      if (generationTarget?.id) {
+        deleteDocument(generationTarget.id);
+      }
+      setWritingState(mode === Mode.AGENT ? WritingState.INPUT : WritingState.OUTLINE_CONFIRM);
+      setMessages((prev) => [...prev, { role: 'ai', content: '已停止生成，本次未保留正文内容。' }]);
+      return;
+    }
+
+    if (writingState === WritingState.OUTLINE_CONFIRM) {
+      setOutline('');
+      setWritingState(WritingState.INPUT);
+      setMessages((prev) => [...prev, { role: 'ai', content: '已取消当前大纲，您可以重新发起写作。' }]);
+      return;
+    }
+
+    if (writingState === WritingState.THINKING) {
+      setOutline('');
+      setWritingState(WritingState.INPUT);
+      setMessages((prev) => [...prev, { role: 'ai', content: '已停止当前生成流程。' }]);
+    }
+  }, [
+    abortActiveWriteRequests,
+    applyDocumentPatch,
+    content,
+    deleteDocument,
+    documents,
+    extractFirstH1Title,
+    invalidateActiveWriteRequests,
+    mode,
+    writingState,
+  ]);
+
   const resetThinking = useCallback(() => {
     thinkingRequestSeqRef.current += 1;
     setThinkingPhase(null);
@@ -662,6 +766,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       ignoreError?: boolean;
     }) => {
       const requestId = ++thinkingRequestSeqRef.current;
+      thinkingAbortControllerRef.current?.abort();
+      const abortController = new AbortController();
+      thinkingAbortControllerRef.current = abortController;
       setThinkingPhase(phase);
       setThinkingStatus('streaming');
       setThinkingContent('');
@@ -672,6 +779,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           outline,
           phase,
           knowledgeBaseIds,
+          signal: abortController.signal,
           onChunk: (_delta, accumulated) => {
             if (requestId !== thinkingRequestSeqRef.current) {
               return;
@@ -692,6 +800,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           return '';
         }
 
+        if (isAbortError(error)) {
+          setThinkingPhase(null);
+          setThinkingStatus('idle');
+          setThinkingContent('');
+          return '';
+        }
+
         if (ignoreError) {
           setThinkingPhase(null);
           setThinkingStatus('idle');
@@ -703,6 +818,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         setThinkingStatus('error');
         setThinkingContent(messageText);
         throw error;
+      } finally {
+        if (thinkingAbortControllerRef.current === abortController) {
+          thinkingAbortControllerRef.current = null;
+        }
       }
     },
     []
@@ -716,6 +835,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       }
 
       const requestId = ++generalRequestSeqRef.current;
+      outlineAbortControllerRef.current?.abort();
+      const abortController = new AbortController();
+      outlineAbortControllerRef.current = abortController;
 
       setSubmittedPrompt(trimmedQuery);
       setPendingCopilotEdit(null);
@@ -744,6 +866,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           generateOutlineWithQwen({
             prompt: trimmedQuery,
             knowledgeBaseIds: mountedKnowledgeBaseIds,
+            signal: abortController.signal,
           }),
           thinkingPromise,
         ]);
@@ -763,10 +886,19 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           return;
         }
 
+        if (isAbortError(error)) {
+          setWritingState(WritingState.INPUT);
+          return;
+        }
+
         const messageText =
           error instanceof Error ? error.message : '大纲生成失败，请稍后重试。';
         setWritingState(WritingState.INPUT);
         setMessages((prev) => [...prev, { role: 'ai', content: `大纲生成失败：${messageText}` }]);
+      } finally {
+        if (outlineAbortControllerRef.current === abortController) {
+          outlineAbortControllerRef.current = null;
+        }
       }
     },
     [extractFirstH1Title, mountedKnowledgeBaseIds, streamRemoteThinking, resetCopilotProgress]
@@ -807,6 +939,22 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   }, [activeDocumentId]);
 
   useEffect(() => {
+    const sanitizedContent = stripSourceSupTags(content);
+    if (sanitizedContent === content) {
+      return;
+    }
+
+    if (activeDocumentIdRef.current) {
+      applyDocumentPatch(activeDocumentIdRef.current, {
+        content: sanitizedContent,
+      });
+      return;
+    }
+
+    setContent(sanitizedContent);
+  }, [content, applyDocumentPatch]);
+
+  useEffect(() => {
     if (taskId) {
       const task = getTask(taskId);
       if (task) {
@@ -825,7 +973,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         setDocuments(taskDocuments);
         setActiveDocumentId(nextActiveDocumentId);
         activeDocumentIdRef.current = nextActiveDocumentId;
-        setContent(nextActiveDocument?.content ?? task.content);
+        setContent(stripSourceSupTags(nextActiveDocument?.content ?? task.content ?? ''));
         setThinkingPhase(null);
         setThinkingStatus('idle');
         setThinkingContent('');
@@ -1317,6 +1465,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       const requestId = ++articleRequestSeqRef.current;
       const streamId = ++articleStreamRef.current;
       const thinkingRequestId = ++thinkingRequestSeqRef.current;
+      generationAbortControllerRef.current?.abort();
+      const abortController = new AbortController();
+      generationAbortControllerRef.current = abortController;
+      activeGenerationRef.current = {
+        documentId,
+        mode: Mode.GENERAL,
+      };
       let hasReceivedThought = false;
       setThinkingPhase('article');
       setThinkingStatus('streaming');
@@ -1327,6 +1482,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           prompt: submittedPrompt,
           outline: confirmedOutline,
           knowledgeBaseIds: mountedKnowledgeBaseIds,
+          signal: abortController.signal,
           onThoughtChunk: (_delta, accumulatedThought) => {
             if (thinkingRequestId !== thinkingRequestSeqRef.current) {
               return;
@@ -1374,6 +1530,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           return;
         }
 
+        if (isAbortError(error)) {
+          return;
+        }
+
         const messageText =
           error instanceof Error ? error.message : '全文生成失败，请稍后重试。';
         if (thinkingRequestId === thinkingRequestSeqRef.current) {
@@ -1384,9 +1544,21 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           status: 'error',
           errorMessage: messageText,
         });
+        activeGenerationRef.current = null;
         setWritingState(WritingState.OUTLINE_CONFIRM);
         setIsGenerating(false);
         setMessages((prev) => [...prev, { role: 'ai', content: `全文生成失败：${messageText}` }]);
+      } finally {
+        if (generationAbortControllerRef.current === abortController) {
+          generationAbortControllerRef.current = null;
+        }
+
+        if (
+          activeGenerationRef.current?.documentId === documentId &&
+          requestId === articleRequestSeqRef.current
+        ) {
+          activeGenerationRef.current = null;
+        }
       }
     },
     [
@@ -1531,12 +1703,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         return;
       }
 
-      if (scenarioData?.agentRuntime?.source !== 'appforge') {
+      if (!scenarioData?.agentRuntime) {
         setMessages((prev) => [
           ...prev,
           {
             role: 'ai',
-            content: '当前智能体已下线或尚未接入真实接口，无法继续生成。',
+            content: '当前智能体尚未配置可用的生成链路，无法继续生成。',
           },
         ]);
         return;
@@ -1566,7 +1738,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       setInput('');
       setSubmittedPrompt(trimmedPrompt);
       setWritingState(WritingState.GENERATING);
-      setIsGenerating(false);
+      setIsGenerating(true);
       setPendingCopilotEdit(null);
       setThinkingPhase(null);
       setThinkingStatus('idle');
@@ -1596,6 +1768,14 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       }
 
       const requestId = ++articleRequestSeqRef.current;
+      const streamId = ++articleStreamRef.current;
+      generationAbortControllerRef.current?.abort();
+      const abortController = new AbortController();
+      generationAbortControllerRef.current = abortController;
+      activeGenerationRef.current = {
+        documentId,
+        mode: Mode.AGENT,
+      };
 
       void (async () => {
         try {
@@ -1603,13 +1783,14 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
             scenarioId: scenarioData.id,
             query: trimmedPrompt,
             inputs: agentInputs,
+            signal: abortController.signal,
             onWorkflowMessage: (payload) => {
               if (requestId !== articleRequestSeqRef.current) {
                 return;
               }
 
               setMessages((prev) =>
-                appendMessage(prev, {
+                upsertMessageById(prev, {
                   id: `${requestId}:${payload.id || `workflow-message-${Date.now()}-${prev.length}`}`,
                   role: 'ai',
                   content: payload.content || '',
@@ -1617,6 +1798,17 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                   title: payload.title,
                 })
               );
+            },
+            onChunk: (_delta, accumulated) => {
+              if (streamId !== articleStreamRef.current) {
+                return;
+              }
+
+              const streamedTitle = extractFirstH1Title(accumulated);
+              applyDocumentPatch(documentId, {
+                content: accumulated,
+                ...(streamedTitle ? { title: streamedTitle } : {}),
+              });
             },
             onResult: (text) => {
               if (requestId !== articleRequestSeqRef.current) {
@@ -1636,7 +1828,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           }
 
           if (!streamResult.result.trim()) {
-            throw new Error('未获取到工作流结束节点内容。');
+            throw new Error('未获取到智能体输出内容。');
           }
 
           const finalTitle = extractFirstH1Title(streamResult.result);
@@ -1657,18 +1849,34 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
             return;
           }
 
+          if (isAbortError(error)) {
+            return;
+          }
+
           const messageText =
             error instanceof Error ? error.message : '全文生成失败，请稍后重试。';
           applyDocumentPatch(documentId, {
             status: 'error',
             errorMessage: messageText,
           });
+          activeGenerationRef.current = null;
           setThinkingPhase(null);
           setThinkingStatus('error');
           setThinkingContent(messageText);
           setIsGenerating(false);
           setWritingState(WritingState.INPUT);
           setMessages((prev) => [...prev, { role: 'ai', content: `全文生成失败：${messageText}` }]);
+        } finally {
+          if (generationAbortControllerRef.current === abortController) {
+            generationAbortControllerRef.current = null;
+          }
+
+          if (
+            activeGenerationRef.current?.documentId === documentId &&
+            requestId === articleRequestSeqRef.current
+          ) {
+            activeGenerationRef.current = null;
+          }
         }
       })();
     },
@@ -1684,7 +1892,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   );
 
   const handleStartGenerate = useCallback(() => {
-    const promptText = (submittedPrompt.trim() || scenarioData?.suggestedQuestion || '').trim();
+    const fallbackSuggestedQuestion =
+      scenarioData?.suggestedQuestions?.find((item) => item.trim()) ||
+      scenarioData?.suggestedQuestion ||
+      '';
+    const promptText = (submittedPrompt.trim() || fallbackSuggestedQuestion).trim();
     startAgentDocumentGeneration({
       promptText,
       appendConfigSnapshot: true,
@@ -1858,6 +2070,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
             <Editor
               content={content}
               writingState={writingState}
+              onStopGenerate={handleStopGeneration}
               onContentChange={(newContent) => {
                 if (pendingCopilotEdit) {
                   setPendingCopilotEdit(null);

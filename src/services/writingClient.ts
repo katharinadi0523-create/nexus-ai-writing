@@ -3,12 +3,14 @@ import { fetchApi } from './apiClient';
 interface GenerateOutlineRequest {
   prompt: string;
   knowledgeBaseIds?: string[];
+  signal?: AbortSignal;
 }
 
 interface GenerateArticleRequest {
   prompt: string;
   outline: string;
   knowledgeBaseIds?: string[];
+  signal?: AbortSignal;
 }
 
 interface StreamArticleRequest extends GenerateArticleRequest {
@@ -22,6 +24,7 @@ interface StreamThoughtRequest {
   phase: 'outline' | 'article' | 'edit';
   knowledgeBaseIds?: string[];
   onChunk?: (delta: string, accumulated: string) => void;
+  signal?: AbortSignal;
 }
 
 type WriteAction = 'outline' | 'article';
@@ -54,13 +57,15 @@ async function parseApiResponse(response: Response): Promise<WriteApiResponse> {
 
 async function requestWriteApi(
   action: WriteAction,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  signal?: AbortSignal
 ): Promise<string> {
   const response = await fetchApi('/api/write', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
+    signal,
     body: JSON.stringify({
       action,
       ...payload,
@@ -126,8 +131,9 @@ function getBoundaryLength(buffer: string, index: number): number {
 export function generateOutlineWithQwen({
   prompt,
   knowledgeBaseIds,
+  signal,
 }: GenerateOutlineRequest): Promise<string> {
-  return requestWriteApi('outline', { prompt, knowledgeBaseIds });
+  return requestWriteApi('outline', { prompt, knowledgeBaseIds }, signal);
 }
 
 export async function streamArticleWithQwen({
@@ -136,12 +142,14 @@ export async function streamArticleWithQwen({
   knowledgeBaseIds,
   onChunk,
   onThoughtChunk,
+  signal,
 }: StreamArticleRequest): Promise<string> {
   const response = await fetchApi('/api/write', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
+    signal,
     body: JSON.stringify({
       action: 'article',
       prompt,
@@ -249,12 +257,14 @@ export async function streamThoughtWithQwen({
   phase,
   knowledgeBaseIds,
   onChunk,
+  signal,
 }: StreamThoughtRequest): Promise<string> {
   const response = await fetchApi('/api/write', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
+    signal,
     body: JSON.stringify({
       action: 'thought',
       prompt,
@@ -348,6 +358,7 @@ export async function streamThoughtWithQwen({
 export function generateArticleWithQwen({
   prompt,
   outline,
+  signal,
 }: GenerateArticleRequest): Promise<string> {
-  return requestWriteApi('article', { prompt, outline });
+  return requestWriteApi('article', { prompt, outline }, signal);
 }

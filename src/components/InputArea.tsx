@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Mode } from '../types/writing';
-import { getActiveScenarioData, mockDataStore, setActiveScenarioId, ScenarioId, AgentCategory } from '../constants/mockData';
-import { Sparkles, Brain, GitBranch, List, BookOpen, Clock, Sliders, Paperclip, Mic, Send, ChevronUp, Search, ArrowLeftRight, X } from 'lucide-react';
+import { getActiveScenarioData, scenarioStore, setActiveScenarioId, ScenarioId } from '../constants/scenarioData';
+import { Sparkles, List, BookOpen, Clock, Sliders, Paperclip, Mic, Send, ChevronUp, Search, ArrowLeftRight, X } from 'lucide-react';
 import { getKnowledgeBasesByKeys } from '../constants/knowledgeBases';
 import { KnowledgeBaseList } from './KnowledgeBaseList';
+import { getCategoryIconTone, getScenarioIcon } from '../utils/scenarioVisuals';
 
 interface InputAreaProps {
   mode: Mode;
@@ -55,7 +56,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
   const [scenarioData, setScenarioData] = useState(() => getActiveScenarioData());
   const agentConfig = scenarioData?.agentConfig;
   const category = scenarioData?.category || 'GENERAL';
-  const allScenarios = Object.values(mockDataStore);
+  const allScenarios = Object.values(scenarioStore);
 
   // 监听 mode 和 selectedScenarioId 变化，重新获取场景数据
   useEffect(() => {
@@ -125,9 +126,9 @@ export const InputArea: React.FC<InputAreaProps> = ({
       if (!agentConfig || mode === Mode.GENERAL) {
         return <Sparkles className="w-4 h-4 text-yellow-500 animate-pulse" />;
       }
-      const IconComponent = category === 'PLANNING' ? Brain : category === 'WORKFLOW' ? GitBranch : Sparkles;
-      const iconColor = category === 'PLANNING' ? 'text-purple-500' : category === 'WORKFLOW' ? 'text-blue-500' : 'text-yellow-500';
-      return <IconComponent className={`w-4 h-4 ${iconColor}`} />;
+
+      const IconComponent = getScenarioIcon(scenarioData?.cardIcon, category);
+      return <IconComponent className="w-4 h-4 text-white" />;
     };
 
     const getButtonText = () => {
@@ -193,9 +194,8 @@ export const InputArea: React.FC<InputAreaProps> = ({
 
               {/* 其他智能体 */}
               {filteredScenarios.map((scenario) => {
-                const IconComponent = scenario.category === 'PLANNING' ? Brain : scenario.category === 'WORKFLOW' ? GitBranch : Sparkles;
-                const iconColor = scenario.category === 'PLANNING' ? 'text-purple-500' : scenario.category === 'WORKFLOW' ? 'text-blue-500' : 'text-yellow-500';
-                const bgColor = scenario.category === 'PLANNING' ? 'bg-purple-100' : scenario.category === 'WORKFLOW' ? 'bg-blue-100' : 'bg-yellow-100';
+                const IconComponent = getScenarioIcon(scenario.cardIcon, scenario.category);
+                const iconTone = getCategoryIconTone(scenario.category);
                 const isSelected = scenario.id === scenarioData?.id;
 
                 return (
@@ -206,8 +206,10 @@ export const InputArea: React.FC<InputAreaProps> = ({
                       isSelected ? 'bg-blue-50' : ''
                     }`}
                   >
-                    <div className={`w-8 h-8 ${bgColor} rounded flex items-center justify-center`}>
-                      <IconComponent className={`w-4 h-4 ${iconColor}`} />
+                    <div
+                      className={`w-8 h-8 rounded flex items-center justify-center ${iconTone.containerClassName}`}
+                    >
+                      <IconComponent className={`w-4 h-4 ${iconTone.iconClassName}`} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-gray-700 truncate">

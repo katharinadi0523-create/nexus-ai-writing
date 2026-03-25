@@ -4,9 +4,16 @@ interface StreamAgentRequest {
   scenarioId: string;
   query: string;
   inputs?: Record<string, unknown>;
+  signal?: AbortSignal;
   onStatus?: (status: string) => void;
   onWorkflowMessage?: (payload: WorkflowMessagePayload) => void;
+  onChunk?: (delta: string, accumulated: string) => void;
   onResult?: (markdown: string) => void;
+}
+
+interface StreamChunkPayload {
+  delta?: string;
+  accumulated?: string;
 }
 
 interface StreamDonePayload {
@@ -106,8 +113,10 @@ export async function streamAgent({
   scenarioId,
   query,
   inputs,
+  signal,
   onStatus,
   onWorkflowMessage,
+  onChunk,
   onResult,
 }: StreamAgentRequest): Promise<{ result: string }> {
   const normalizedInputs = normalizeInputs(inputs);
@@ -116,6 +125,7 @@ export async function streamAgent({
     headers: {
       'Content-Type': 'application/json',
     },
+    signal,
     body: JSON.stringify({
       scenarioId,
       query,
@@ -157,6 +167,18 @@ export async function streamAgent({
         if (payload.content) {
           onWorkflowMessage?.(payload);
         }
+        return;
+      }
+
+      if (parsed.event === 'chunk') {
+        const payload = JSON.parse(parsed.data) as StreamChunkPayload;
+        const delta = payload.delta || '';
+        if (payload.accumulated !== undefined) {
+          result = payload.accumulated;
+        } else if (delta) {
+          result += delta;
+        }
+        onChunk?.(delta, result);
         return;
       }
 
