@@ -637,25 +637,40 @@ export function shouldUseQuarterlyReportDemo(
   prompt: string,
   selectedTemplateId?: string | null
 ) {
-  if (selectedTemplateId !== QUARTERLY_REPORT_TEMPLATE_ID) {
-    return false;
-  }
-
   const normalizedPrompt = normalizePrompt(prompt);
   if (!normalizedPrompt) {
     return false;
   }
 
   const normalizedDemoPrompt = normalizePrompt(QUARTERLY_REPORT_DEMO_PROMPT);
+  const hasTemplateSelected = selectedTemplateId === QUARTERLY_REPORT_TEMPLATE_ID;
+  const hasMetricsIntent =
+    normalizedPrompt.includes('经营数据') ||
+    normalizedPrompt.includes('经营分析') ||
+    normalizedPrompt.includes('签约') ||
+    normalizedPrompt.includes('回款');
 
-  return (
+  const hasQuarterlyReportIntent =
     normalizedPrompt.includes(normalizedDemoPrompt) ||
     normalizedPrompt.includes('产品组季度工作汇报') ||
     normalizedPrompt.includes('季度工作汇报') ||
     normalizedPrompt.includes('季度正式汇报') ||
+    normalizedPrompt.includes('产品工作季报') ||
+    normalizedPrompt.includes('产品季报') ||
     (normalizedPrompt.includes('季度') && normalizedPrompt.includes('汇报')) ||
-    (normalizedPrompt.includes('q1') && normalizedPrompt.includes('汇报'))
-  );
+    (normalizedPrompt.includes('q1') && normalizedPrompt.includes('汇报'));
+
+  const hasStrongPromptMatch =
+    normalizedPrompt.includes('产品工作季报') ||
+    normalizedPrompt.includes('产品季报') ||
+    (normalizedPrompt.includes('季报') && hasMetricsIntent) ||
+    (normalizedPrompt.includes('季度') && normalizedPrompt.includes('汇报') && hasMetricsIntent);
+
+  if (hasTemplateSelected) {
+    return hasQuarterlyReportIntent;
+  }
+
+  return hasStrongPromptMatch;
 }
 
 export function getQuarterlyReportPeriodEcho(answer: boolean | null) {

@@ -37,9 +37,9 @@ import {
   QUARTERLY_REPORT_DEMO_TITLE,
   QUARTERLY_REPORT_FINAL_DOCX_PUBLIC_PATH,
   QUARTERLY_REPORT_FINAL_EDITOR_DOCUMENT_TITLE,
+  QUARTERLY_REPORT_TEMPLATE_ID,
   shouldUseQuarterlyReportDemo,
 } from '../constants/quarterly-report-flow-data';
-import { useIterationMode } from '../contexts/IterationModeContext';
 
 interface WorkspaceViewProps {
   initialInput: string;
@@ -427,7 +427,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   mountedKnowledgeBaseIds,
   onMountedKnowledgeBaseChange,
 }) => {
-  const { isIterationMode } = useIterationMode();
   const initialTask = taskId ? getTask(taskId) : null;
   const initialDocuments = buildInitialDocuments(initialTask);
   const initialActiveDocumentId = resolveInitialActiveDocumentId(initialTask, initialDocuments);
@@ -496,7 +495,6 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const [quarterlyReportDemoState, setQuarterlyReportDemoState] =
     useState<QuarterlyReportDemoState>(initialQuarterlyReportDemoState);
   const [isQuarterlyReportDemoActive, setIsQuarterlyReportDemoActive] = useState<boolean>(() =>
-    isIterationMode &&
     shouldUseQuarterlyReportDemo(initialTask?.input ?? initialInput, initialSelectedTemplateId)
   );
   const currentTaskIdRef = useRef<string | null>(taskId || null);
@@ -1194,7 +1192,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           task.quarterlyReportDemoState ?? createDefaultQuarterlyReportDemoState()
         );
         setIsQuarterlyReportDemoActive(
-          isIterationMode && shouldUseQuarterlyReportDemo(task.input, task.selectedTemplateId)
+          shouldUseQuarterlyReportDemo(task.input, task.selectedTemplateId)
         );
         setMessages(
           (task.messages || []).map((m) => ({
@@ -1214,7 +1212,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     } else {
       currentTaskIdRef.current = null;
     }
-  }, [taskId, resetCopilotProgress, isIterationMode]);
+  }, [taskId, resetCopilotProgress]);
 
   const saveCurrentTask = useCallback(() => {
     if (currentTaskIdRef.current) {
@@ -1608,6 +1606,17 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
 
     const query = input.trim();
     if (!query) {
+      return;
+    }
+
+    if (shouldUseQuarterlyReportDemo(query, selectedTemplateId)) {
+      setInput('');
+      setSubmittedPrompt(query);
+      if (selectedTemplateId !== QUARTERLY_REPORT_TEMPLATE_ID) {
+        setSelectedTemplateId(QUARTERLY_REPORT_TEMPLATE_ID);
+      }
+      setQuarterlyReportDemoState(createDefaultQuarterlyReportDemoState());
+      setIsQuarterlyReportDemoActive(true);
       return;
     }
 
