@@ -19,6 +19,96 @@ export interface KnowledgeBaseDefinition {
 
 export const knowledgeBaseRegistry: KnowledgeBaseDefinition[] = [
   {
+    key: 'appforge:mock-product-ops-2026-q1:product-quarterly-reports-2025',
+    name: '25年产品季报',
+    description: '沉淀 2025 年产品季度经营复盘、关键指标拆解与阶段策略总结。',
+    source: 'appforge',
+    sourceLabel: '应用开发平台',
+    projectName: '2026-Q1-产品经营',
+    projectId: 'mock-product-ops-2026-q1',
+    datasetId: 'mock_product_quarterly_reports_2025',
+    retrievalMode: 'mock',
+    itemCount: 18,
+    createdAt: '2026-03-08',
+    mockChunks: [
+      '产品季报通常需要同时呈现目标达成、核心指标变化、重点动作复盘与下阶段策略，避免只罗列数据不解释原因。',
+      '季度经营复盘建议从收入贡献、用户增长、重点场景渗透和组织协同四个维度展开，突出变化趋势与关键转折点。',
+      '面向管理层的季报结论应先给总体判断，再给结构性问题和下一季度行动，保证信息密度和决策可读性。',
+    ],
+  },
+  {
+    key: 'appforge:mock-product-ops-2026-q1:product-monthly-reports-2026',
+    name: '26年产品月报',
+    description: '整理 2026 年产品月度经营汇报材料，便于复用月报结构、表达与分析框架。',
+    source: 'appforge',
+    sourceLabel: '应用开发平台',
+    projectName: '2026-Q1-产品经营',
+    projectId: 'mock-product-ops-2026-q1',
+    datasetId: 'mock_product_monthly_reports_2026',
+    retrievalMode: 'mock',
+    itemCount: 26,
+    createdAt: '2026-03-11',
+    mockChunks: [
+      '产品月报建议固定呈现收入、活跃、转化、交付进度和风险事项五类内容，保证月度对比的一致性。',
+      '月报分析要区分同比、环比和累计口径，避免把短期波动误判为长期趋势。',
+      '当月重点结论应尽量落到具体产品线、客户群或场景，帮助管理层快速判断问题发生在哪里。',
+    ],
+  },
+  {
+    key: 'appforge:mock-product-ops-2026-q1:business-analysis-cases',
+    name: '常见经营分析案例',
+    description: '汇总收入、成本、毛利、活跃与转化等常见经营分析案例，适合复盘和数据汇报场景。',
+    source: 'appforge',
+    sourceLabel: '应用开发平台',
+    projectName: '2026-Q1-产品经营',
+    projectId: 'mock-product-ops-2026-q1',
+    datasetId: 'mock_business_analysis_cases',
+    retrievalMode: 'mock',
+    itemCount: 21,
+    createdAt: '2026-03-15',
+    mockChunks: [
+      '经营分析案例通常需要把现象、原因、影响和建议动作串成闭环，避免只停留在指标涨跌描述。',
+      '分析收入增长时，建议拆分存量增购、新签转化和价格调整三类驱动，判断增长是否可持续。',
+      '针对活跃度下滑类案例，可从用户结构变化、核心路径转化和功能使用深度三层定位问题。',
+    ],
+  },
+  {
+    key: 'appforge:mock-product-ops-2026-q1:classic-business-issue-cases',
+    name: '经营问题经典case',
+    description: '沉淀增长放缓、毛利承压、交付波动等典型经营问题的分析路径与复盘案例。',
+    source: 'appforge',
+    sourceLabel: '应用开发平台',
+    projectName: '2026-Q1-产品经营',
+    projectId: 'mock-product-ops-2026-q1',
+    datasetId: 'mock_classic_business_issue_cases',
+    retrievalMode: 'mock',
+    itemCount: 16,
+    createdAt: '2026-03-18',
+    mockChunks: [
+      '经典经营问题复盘应先判断是结构性问题还是阶段性波动，再决定是做专项治理还是持续观察。',
+      '毛利承压类 case 往往要同步检查报价策略、实施边界和资源投入效率，不能只看单一成本项。',
+      '对于新签转化变慢的问题，可从商机质量、销售周期、方案匹配度和决策链条长度四个维度展开排查。',
+    ],
+  },
+  {
+    key: 'appforge:mock-product-ops-2026-q1:reporting-metrics-definitions',
+    name: '产品经营数据汇报数据口径',
+    description: '统一产品经营汇报中的收入、毛利、活跃、转化与留存等指标定义和统计口径。',
+    source: 'appforge',
+    sourceLabel: '应用开发平台',
+    projectName: '2026-Q1-产品经营',
+    projectId: 'mock-product-ops-2026-q1',
+    datasetId: 'mock_reporting_metrics_definitions',
+    retrievalMode: 'mock',
+    itemCount: 14,
+    createdAt: '2026-03-20',
+    mockChunks: [
+      '经营汇报中的收入指标需明确是否含税、是否按签约口径还是确认口径统计，避免跨报告直接比较。',
+      '毛利率分析应统一成本归集范围，明确是否包含实施人力、售后支持和渠道分成等间接成本。',
+      '活跃、转化、留存等用户指标必须同步说明统计周期、去重规则和样本范围，确保口径一致。',
+    ],
+  },
+  {
     key: 'appforge:proj-5ss04wr7:docstore_3qY9FZtK',
     name: '现代化作战报告集',
     description: '来自应用开发平台的真实知识库，可为通用写作智能体提供外挂检索片段。',
@@ -239,6 +329,10 @@ export function getKnowledgeBasesByKeys(
   }, []);
 }
 
+const defaultProjectNameBySource = new Map<string, string>([
+  ['应用开发平台', '2026-Q1-产品经营'],
+]);
+
 export function groupKnowledgeBasesBySource(): Array<{
   sourceLabel: string;
   defaultProjectName: string;
@@ -270,10 +364,29 @@ export function groupKnowledgeBasesBySource(): Array<{
       items: projectItems,
     }));
 
+    const preferredProjectName = defaultProjectNameBySource.get(sourceLabel);
+    const sortedProjects = preferredProjectName
+      ? [...projects].sort((left, right) => {
+          if (left.projectName === preferredProjectName) {
+            return -1;
+          }
+
+          if (right.projectName === preferredProjectName) {
+            return 1;
+          }
+
+          return 0;
+        })
+      : projects;
+
     return {
       sourceLabel,
-      defaultProjectName: projects[0]?.projectName || '',
-      projects,
+      defaultProjectName:
+        sortedProjects.find((project) => project.projectName === preferredProjectName)
+          ?.projectName ||
+        sortedProjects[0]?.projectName ||
+        '',
+      projects: sortedProjects,
       items,
     };
   });

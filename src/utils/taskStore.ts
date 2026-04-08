@@ -8,6 +8,8 @@ import { GeneralContentSource, Mode, WritingState } from '../types/writing';
 import { ScenarioId } from '../constants/scenarioData';
 import type { AgentConfigSnapshot, AgentWriteConfirmation, ChatMessageVariant } from '../types/chat';
 import type { WritingDocument } from '../types/document';
+import type { LocalWorkspaceSelection } from '../types/localWorkspace';
+import type { QuarterlyReportDemoState } from '../types/quarterlyReportDemo';
 
 /** 可序列化的消息格式（content 仅允许 string，便于 JSON 持久化） */
 export interface SerializableMessage {
@@ -65,6 +67,10 @@ export interface Task {
   input: string;
   /** 智能体 ID（如果有） */
   scenarioId?: ScenarioId;
+  /** 当前任务关联的模板 ID（若有） */
+  selectedTemplateId?: string;
+  /** 当前任务关联的本地工作空间（若有） */
+  selectedLocalWorkspace?: LocalWorkspaceSelection;
   /** 通用模式下的内容来源 */
   generalContentSource?: GeneralContentSource;
   /** 文档内容 */
@@ -83,6 +89,8 @@ export interface Task {
   activeDocumentId: string | null;
   /** 对话消息历史（存储时 content 仅为 string） */
   messages: SerializableMessage[];
+  /** 固定季度汇报 mock 流程状态 */
+  quarterlyReportDemoState?: QuarterlyReportDemoState;
 }
 
 const STORAGE_KEY = 'nexus_writing_tasks';
@@ -167,7 +175,9 @@ export function createTask(
   name: string,
   input: string,
   mode: Mode,
-  scenarioId?: ScenarioId
+  scenarioId?: ScenarioId,
+  selectedTemplateId?: string,
+  selectedLocalWorkspace?: LocalWorkspaceSelection
 ): Task {
   const now = Date.now();
   const task: Task = {
@@ -179,6 +189,8 @@ export function createTask(
     writingState: WritingState.THINKING,
     input,
     scenarioId,
+    selectedTemplateId,
+    selectedLocalWorkspace,
     content: '',
     documentName: '新文档_1',
     outline: '',

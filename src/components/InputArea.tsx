@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Mode } from '../types/writing';
 import { getActiveScenarioData, scenarioStore, setActiveScenarioId, ScenarioId } from '../constants/scenarioData';
-import { Sparkles, List, BookOpen, Clock, Sliders, Paperclip, Mic, Send, ChevronUp, Search, ArrowLeftRight, X } from 'lucide-react';
+import { Sparkles, List, BookOpen, Clock, Sliders, Paperclip, Mic, Send, ChevronUp, Search, ArrowLeftRight, X, FileText, FolderOpen } from 'lucide-react';
 import { getKnowledgeBasesByKeys } from '../constants/knowledgeBases';
 import { KnowledgeBaseList } from './KnowledgeBaseList';
 import { getCategoryIconTone, getScenarioIcon } from '../utils/scenarioVisuals';
@@ -25,6 +25,13 @@ interface InputAreaProps {
   /** 已进入写作模式时隐藏智能体选择和模式切换，防止中途切换 */
   hideAgentAndModeSelector?: boolean;
   showMountedKnowledgeBasesInline?: boolean;
+  showTemplateEntry?: boolean;
+  selectedTemplateLabel?: string | null;
+  onTemplateClick?: () => void;
+  showWorkspaceEntry?: boolean;
+  selectedWorkspaceLabel?: string | null;
+  selectedWorkspaceMeta?: string | null;
+  onWorkspaceClick?: () => void;
 }
 
 export const InputArea: React.FC<InputAreaProps> = ({
@@ -45,6 +52,13 @@ export const InputArea: React.FC<InputAreaProps> = ({
   selectedScenarioId,
   hideAgentAndModeSelector = false,
   showMountedKnowledgeBasesInline = false,
+  showTemplateEntry = false,
+  selectedTemplateLabel = null,
+  onTemplateClick,
+  showWorkspaceEntry = false,
+  selectedWorkspaceLabel = null,
+  selectedWorkspaceMeta = null,
+  onWorkspaceClick,
 }) => {
   const [isAgentDropdownOpen, setIsAgentDropdownOpen] = useState(false);
   const [isKnowledgeBaseListOpen, setIsKnowledgeBaseListOpen] = useState(false);
@@ -235,6 +249,55 @@ export const InputArea: React.FC<InputAreaProps> = ({
   // 渲染功能按钮组
   const renderFunctionButtons = () => {
     const buttons = [];
+
+    if (showTemplateEntry && onTemplateClick) {
+      buttons.push(
+        <button
+          key="template"
+          onClick={onTemplateClick}
+          className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-all shadow-sm ${
+            selectedTemplateLabel
+              ? 'border-amber-200 bg-white/95 text-slate-700 hover:bg-amber-50/60'
+              : 'border-gray-200 bg-white/80 backdrop-blur-sm text-gray-700 hover:bg-white/90'
+          }`}
+        >
+          <FileText className={`h-4 w-4 ${selectedTemplateLabel ? 'text-amber-500' : 'text-gray-500'}`} />
+          <span className="max-w-[180px] truncate">
+            {selectedTemplateLabel ? `模板：${selectedTemplateLabel}` : '模板'}
+          </span>
+        </button>
+      );
+    }
+
+    if (showWorkspaceEntry && onWorkspaceClick) {
+      buttons.push(
+        <button
+          key="workspace"
+          onClick={onWorkspaceClick}
+          className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-all shadow-sm ${
+            selectedWorkspaceLabel
+              ? 'border-emerald-200 bg-white/95 text-slate-700 hover:bg-emerald-50/60'
+              : 'border-gray-200 bg-white/80 backdrop-blur-sm text-gray-700 hover:bg-white/90'
+          }`}
+        >
+          <FolderOpen className={`h-4 w-4 ${selectedWorkspaceLabel ? 'text-emerald-500' : 'text-gray-500'}`} />
+          <span className="max-w-[180px] truncate">
+            {selectedWorkspaceLabel ? `工作空间：${selectedWorkspaceLabel}` : '工作空间'}
+          </span>
+          {selectedWorkspaceMeta ? (
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                selectedWorkspaceLabel
+                  ? 'border border-emerald-100 bg-emerald-50 text-emerald-700'
+                  : 'bg-gray-100 text-gray-500'
+              }`}
+            >
+              {selectedWorkspaceMeta}
+            </span>
+          ) : null}
+        </button>
+      );
+    }
 
     if (mode === Mode.GENERAL) {
       // 通用模式：分步生成切换 + 知识库

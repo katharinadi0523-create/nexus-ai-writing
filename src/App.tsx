@@ -4,7 +4,9 @@ import { ScenarioId, setActiveScenarioId } from './constants/scenarioData';
 import { HomeView } from './views/HomeView';
 import { WorkspaceView } from './views/WorkspaceView';
 import { Sidebar } from './components/Sidebar';
+import { IterationModeSwitch } from './components/IterationModeSwitch';
 import { createTask, Task } from './utils/taskStore';
+import type { LocalWorkspaceSelection } from './types/localWorkspace';
 import {
   getMountedKnowledgeBaseIds,
   saveMountedKnowledgeBaseIds,
@@ -58,45 +60,61 @@ function App() {
   };
 
   // 处理创建新任务（从首页发送时）
-  const handleCreateTask = (input: string, mode: Mode, scenarioId?: ScenarioId) => {
-    const task = createTask(input, input, mode, scenarioId);
+  const handleCreateTask = (
+    input: string,
+    mode: Mode,
+    scenarioId?: ScenarioId,
+    selectedTemplateId?: string,
+    selectedLocalWorkspace?: LocalWorkspaceSelection
+  ) => {
+    const task = createTask(
+      input,
+      input,
+      mode,
+      scenarioId,
+      selectedTemplateId,
+      selectedLocalWorkspace
+    );
     handleStartWriting(input, mode, scenarioId, task.id);
   };
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      {/* 左侧任务栏仅在首页显示；进入具体写作任务后隐藏 */}
-      {currentView === 'home' && (
-        <Sidebar 
-          onTaskRestore={handleTaskRestore}
-          currentView={currentView}
-        />
-      )}
-
-      {/* 主内容区域 */}
-      <div className="flex min-h-0 flex-1 flex-col">
+    <>
+      <div className="flex h-screen overflow-hidden">
+        {/* 左侧任务栏仅在首页显示；进入具体写作任务后隐藏 */}
         {currentView === 'home' && (
-          <HomeView
-            onStartWriting={handleCreateTask}
-            selectedScenarioId={selectedScenarioId || undefined}
-            onScenarioSelect={setSelectedScenarioId}
-            mountedKnowledgeBaseIds={mountedKnowledgeBaseIds}
-            onMountedKnowledgeBaseChange={setMountedKnowledgeBaseIds}
+          <Sidebar 
+            onTaskRestore={handleTaskRestore}
+            currentView={currentView}
           />
         )}
-        {currentView === 'workspace' && (
-          <WorkspaceView
-            initialInput={workspaceInput}
-            initialMode={workspaceMode}
-            initialScenarioId={selectedScenarioId || undefined}
-            taskId={currentTaskId}
-            onBack={handleBackToHome}
-            mountedKnowledgeBaseIds={mountedKnowledgeBaseIds}
-            onMountedKnowledgeBaseChange={setMountedKnowledgeBaseIds}
-          />
-        )}
+
+        {/* 主内容区域 */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          {currentView === 'home' && (
+            <HomeView
+              onStartWriting={handleCreateTask}
+              selectedScenarioId={selectedScenarioId || undefined}
+              onScenarioSelect={setSelectedScenarioId}
+              mountedKnowledgeBaseIds={mountedKnowledgeBaseIds}
+              onMountedKnowledgeBaseChange={setMountedKnowledgeBaseIds}
+            />
+          )}
+          {currentView === 'workspace' && (
+            <WorkspaceView
+              initialInput={workspaceInput}
+              initialMode={workspaceMode}
+              initialScenarioId={selectedScenarioId || undefined}
+              taskId={currentTaskId}
+              onBack={handleBackToHome}
+              mountedKnowledgeBaseIds={mountedKnowledgeBaseIds}
+              onMountedKnowledgeBaseChange={setMountedKnowledgeBaseIds}
+            />
+          )}
+        </div>
       </div>
-    </div>
+      <IterationModeSwitch />
+    </>
   );
 }
 

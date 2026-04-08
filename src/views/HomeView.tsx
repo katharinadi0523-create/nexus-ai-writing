@@ -1,18 +1,35 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Mode } from '../types/writing';
 import { scenarioStore, setActiveScenarioId, ScenarioId } from '../constants/scenarioData';
 import { InputArea } from '../components/InputArea';
 import { KnowledgeBaseSelector } from '../components/KnowledgeBaseSelector';
 import { MemoryModal } from '../components/MemoryModal';
 import { ParamsModal } from '../components/ParamsModal';
+import { WritingTemplateModal } from '../components/WritingTemplateModal';
 import { Star } from 'lucide-react';
 import { getScenarioIcon } from '../utils/scenarioVisuals';
+import { useIterationMode } from '../contexts/IterationModeContext';
+import { getWritingTemplateById } from '../constants/writingTemplates';
+import type { LocalWorkspaceSelection } from '../types/localWorkspace';
+import {
+  createLocalWorkspaceSelectionFromFiles,
+  isValidLocalWorkspaceSelection,
+} from '../utils/localWorkspace';
 
 const FAVORITE_AGENTS_STORAGE_KEY = 'favoriteAgentIds';
+const FAVORITE_TEMPLATES_STORAGE_KEY = 'favoriteWritingTemplateIds';
+const SELECTED_TEMPLATE_STORAGE_KEY = 'selectedWritingTemplateId';
+const SELECTED_LOCAL_WORKSPACE_STORAGE_KEY = 'selectedLocalWorkspace';
 const AGENTS_PER_PAGE = 6;
 
 interface HomeViewProps {
-  onStartWriting: (input: string, mode: Mode, scenarioId?: ScenarioId) => void;
+  onStartWriting: (
+    input: string,
+    mode: Mode,
+    scenarioId?: ScenarioId,
+    selectedTemplateId?: string,
+    selectedLocalWorkspace?: LocalWorkspaceSelection
+  ) => void;
   selectedScenarioId?: ScenarioId;
   onScenarioSelect?: (scenarioId: ScenarioId | null) => void;
   mountedKnowledgeBaseIds: string[];
@@ -26,14 +43,18 @@ export const HomeView: React.FC<HomeViewProps> = ({
   mountedKnowledgeBaseIds,
   onMountedKnowledgeBaseChange,
 }) => {
+  const { isIterationMode } = useIterationMode();
   const [input, setInput] = useState<string>('');
   const [stepGenerationEnabled, setStepGenerationEnabled] = useState<boolean>(true); // 默认开启
   const [selectedAgentId, setSelectedAgentId] = useState<ScenarioId | null>(selectedScenarioId || null);
   const [isKnowledgeBaseOpen, setIsKnowledgeBaseOpen] = useState<boolean>(false);
   const [isMemoryModalOpen, setIsMemoryModalOpen] = useState<boolean>(false);
   const [isParamsModalOpen, setIsParamsModalOpen] = useState<boolean>(false);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState<boolean>(false);
+  const [isReadingWorkspace, setIsReadingWorkspace] = useState<boolean>(false);
   const [activeAgentTab, setActiveAgentTab] = useState<'organization' | 'favorite'>('organization');
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const workspacePickerRef = useRef<HTMLInputElement | null>(null);
   const [favoriteAgentIds, setFavoriteAgentIds] = useState<ScenarioId[]>(() => {
     if (typeof window === 'undefined') {
       return Object.values(scenarioStore)
@@ -57,8 +78,76 @@ export const HomeView: React.FC<HomeViewProps> = ({
       .filter((scenario) => scenario.isFavorite)
       .map((scenario) => scenario.id);
   });
+  const [favoriteTemplateIds, setFavoriteTemplateIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') {
+      return [];
+    }
+
+    try {
+      const saved = window.localStorage.getItem(FAVORITE_TEMPLATES_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((item): item is string => typeof item === 'string');
+        }
+      }
+    } catch (error) {
+      console.error('读取收藏模板失败:', error);
+    }
+
+    return [];
+  });
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    try {
+      const saved = window.localStorage.getItem(SELECTED_TEMPLATE_STORAGE_KEY);
+      if (saved && getWritingTemplateById(saved)) {
+        return saved;
+      }
+    } catch (error) {
+      console.error('读取已选模板失败:', error);
+    }
+
+    return null;
+  });
+  const [selectedLocalWorkspace, setSelectedLocalWorkspace] = useState<LocalWorkspaceSelection | null>(() => {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    try {
+      const saved = window.localStorage.getItem(SELECTED_LOCAL_WORKSPACE_STORAGE_KEY);
+      if (!saved) {
+        return null;
+      }
+
+      const parsed = JSON.parse(saved);
+      if (isValidLocalWorkspaceSelection(parsed)) {
+        return parsed;
+      }
+    } catch (error) {
+      console.error('读取本地工作空间失败:', error);
+    }
+
+    return null;
+  });
 
   const allScenarios = Object.values(scenarioStore);
+  const selectedTemplate = getWritingTemplateById(selectedTemplateId);
+  const selectedWorkspaceMeta = useMemo(() => {
+    if (isReadingWorkspace) {
+      return '读取中';
+    }
+
+    if (!selectedLocalWorkspace) {
+      return null;
+    }
+
+    return `${selectedLocalWorkspace.fileCount} 个文件`;
+  }, [isReadingWorkspace, selectedLocalWorkspace]);
 
   // 同步外部选择的场景
   useEffect(() => {
@@ -76,6 +165,47 @@ export const HomeView: React.FC<HomeViewProps> = ({
     }
   }, [favoriteAgentIds]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(FAVORITE_TEMPLATES_STORAGE_KEY, JSON.stringify(favoriteTemplateIds));
+    } catch (error) {
+      console.error('保存收藏模板失败:', error);
+    }
+  }, [favoriteTemplateIds]);
+
+  useEffect(() => {
+    try {
+      if (selectedTemplateId) {
+        window.localStorage.setItem(SELECTED_TEMPLATE_STORAGE_KEY, selectedTemplateId);
+      } else {
+        window.localStorage.removeItem(SELECTED_TEMPLATE_STORAGE_KEY);
+      }
+    } catch (error) {
+      console.error('保存已选模板失败:', error);
+    }
+  }, [selectedTemplateId]);
+
+  useEffect(() => {
+    try {
+      if (selectedLocalWorkspace) {
+        window.localStorage.setItem(
+          SELECTED_LOCAL_WORKSPACE_STORAGE_KEY,
+          JSON.stringify(selectedLocalWorkspace)
+        );
+      } else {
+        window.localStorage.removeItem(SELECTED_LOCAL_WORKSPACE_STORAGE_KEY);
+      }
+    } catch (error) {
+      console.error('保存本地工作空间失败:', error);
+    }
+  }, [selectedLocalWorkspace]);
+
+  useEffect(() => {
+    if (!isIterationMode && isTemplateModalOpen) {
+      setIsTemplateModalOpen(false);
+    }
+  }, [isIterationMode, isTemplateModalOpen]);
+
   const handleSend = () => {
     if (!input.trim()) return;
     
@@ -87,7 +217,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
       setActiveScenarioId(selectedAgentId);
     }
     
-    onStartWriting(input, mode, selectedAgentId || undefined);
+    onStartWriting(
+      input,
+      mode,
+      selectedAgentId || undefined,
+      selectedTemplateId || undefined,
+      selectedLocalWorkspace || undefined
+    );
   };
 
   const handleAgentCardClick = (scenarioId: ScenarioId) => {
@@ -99,7 +235,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
       
       // 如果输入框有内容，自动跳转到工作台
       if (input.trim()) {
-        onStartWriting(input, Mode.AGENT, newSelection);
+        onStartWriting(
+          input,
+          Mode.AGENT,
+          newSelection,
+          selectedTemplateId || undefined,
+          selectedLocalWorkspace || undefined
+        );
       }
     }
     
@@ -149,8 +291,50 @@ export const HomeView: React.FC<HomeViewProps> = ({
     }
   }, [currentPage, totalPages]);
 
+  const handleWorkspacePick = () => {
+    workspacePickerRef.current?.click();
+  };
+
+  const handleWorkspaceFilesChange = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    setIsReadingWorkspace(true);
+    try {
+      const nextWorkspace = await createLocalWorkspaceSelectionFromFiles(files);
+      setSelectedLocalWorkspace(nextWorkspace);
+    } catch (error) {
+      console.error('读取本地工作空间失败:', error);
+    } finally {
+      setIsReadingWorkspace(false);
+      event.target.value = '';
+    }
+  };
+
+  const directoryInputProps =
+    {
+      directory: '',
+      webkitdirectory: '',
+      multiple: true,
+    } as React.InputHTMLAttributes<HTMLInputElement> & {
+      directory?: string;
+      webkitdirectory?: string;
+    };
+
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-y-auto bg-gray-50">
+      <input
+        {...directoryInputProps}
+        ref={workspacePickerRef}
+        type="file"
+        className="hidden"
+        onChange={handleWorkspaceFilesChange}
+      />
+
       {/* 主标题 */}
       <div className="text-center py-12">
         <h1 className="text-6xl font-bold text-gray-800 mb-4">
@@ -178,6 +362,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
             );
           }}
           showMountedKnowledgeBasesInline
+          showTemplateEntry={isIterationMode}
+          selectedTemplateLabel={selectedTemplate?.name || null}
+          onTemplateClick={() => setIsTemplateModalOpen(true)}
+          showWorkspaceEntry={isIterationMode}
+          selectedWorkspaceLabel={
+            isReadingWorkspace ? '正在读取工作空间' : selectedLocalWorkspace?.folderName || null
+          }
+          selectedWorkspaceMeta={selectedWorkspaceMeta}
+          onWorkspaceClick={handleWorkspacePick}
           selectedScenarioId={selectedAgentId || undefined}
           onMemoryClick={() => {
             setIsMemoryModalOpen(true);
@@ -200,6 +393,18 @@ export const HomeView: React.FC<HomeViewProps> = ({
             }
           }}
         />
+
+        {isIterationMode && selectedTemplate ? (
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-sm">
+            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-amber-700">
+              当前模板
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-3">
+              <div className="text-sm font-semibold text-slate-900">{selectedTemplate.name}</div>
+              <div className="text-sm text-slate-500">{selectedTemplate.description}</div>
+            </div>
+          </div>
+        ) : null}
         
         {/* 推荐问题 */}
         {selectedAgentId && (() => {
@@ -218,7 +423,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 if (selectedAgentId) {
                   setActiveScenarioId(selectedAgentId);
                 }
-                onStartWriting(suggestedQuestion, mode, selectedAgentId || undefined);
+                onStartWriting(
+                  suggestedQuestion,
+                  mode,
+                  selectedAgentId || undefined,
+                  selectedTemplateId || undefined
+                );
               }, 0);
             };
             return (
@@ -407,6 +617,18 @@ export const HomeView: React.FC<HomeViewProps> = ({
         onClose={() => setIsParamsModalOpen(false)}
         onUpdate={(values) => {
           console.log('参数配置已更新:', values);
+        }}
+      />
+
+      <WritingTemplateModal
+        isOpen={isTemplateModalOpen}
+        initialSelectedTemplateId={selectedTemplateId}
+        initialFavoriteTemplateIds={favoriteTemplateIds}
+        onClose={() => setIsTemplateModalOpen(false)}
+        onConfirm={({ selectedTemplateId: nextSelectedTemplateId, favoriteTemplateIds: nextFavoriteTemplateIds }) => {
+          setSelectedTemplateId(nextSelectedTemplateId);
+          setFavoriteTemplateIds(nextFavoriteTemplateIds);
+          setIsTemplateModalOpen(false);
         }}
       />
 

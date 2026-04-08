@@ -66,6 +66,8 @@ interface CopilotSidebarProps {
   onCancelAgentWrite?: (messageId: string) => void;
   mountedKnowledgeBaseIds: string[];
   onMountedKnowledgeBaseChange: (ids: string[]) => void;
+  customChatContent?: React.ReactNode;
+  hideInputArea?: boolean;
   className?: string;
 }
 
@@ -475,6 +477,8 @@ export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
   onCancelAgentWrite,
   mountedKnowledgeBaseIds,
   onMountedKnowledgeBaseChange,
+  customChatContent,
+  hideInputArea = false,
   className,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('chat');
@@ -515,6 +519,7 @@ export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
     }
 
     if (
+      !customChatContent &&
       initialPrompt &&
       !initialized &&
       (writingState === WritingState.THINKING ||
@@ -562,6 +567,10 @@ export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
   ]);
 
   const renderChatContent = () => {
+    if (customChatContent) {
+      return customChatContent;
+    }
+
     const showOutlineBlock =
       outline.trim() &&
       mode === Mode.GENERAL &&
@@ -802,7 +811,7 @@ export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({
           )}
         </div>
       )}
-      {activeTab === 'chat' && (
+      {activeTab === 'chat' && !hideInputArea && (
         <div className="border-t border-gray-200">
           <InputArea
             mode={mode}

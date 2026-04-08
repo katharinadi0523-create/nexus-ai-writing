@@ -11,6 +11,8 @@ import { scenarioStore, ScenarioId, setActiveScenarioId } from '../constants/sce
 import { Editor } from '../components/Editor';
 import type { RewriteType } from '../components/RewriteWindow';
 import { CopilotSidebar } from '../components/CopilotSidebar';
+import { QuarterlyReportConversationFlow } from '../components/QuarterlyReportConversationFlow';
+import { QuarterlyReportPreviewPanel } from '../components/QuarterlyReportPreviewPanel';
 import { ArrowLeft, Edit2 } from 'lucide-react';
 import { getTask, updateTask } from '../utils/taskStore';
 import type { Task } from '../utils/taskStore';
@@ -26,6 +28,18 @@ import type {
   ChatMessageVariant,
 } from '../types/chat';
 import type { WritingDocument, WritingDocumentStatus } from '../types/document';
+import type { LocalWorkspaceSelection } from '../types/localWorkspace';
+import type { QuarterlyReportDemoState, QuarterlyReportSelectedAnswers } from '../types/quarterlyReportDemo';
+import {
+  buildQuarterlyReportPreviewMarkdown,
+  createDefaultQuarterlyReportDemoState,
+  QUARTERLY_REPORT_DEMO_DOCUMENT_ID,
+  QUARTERLY_REPORT_DEMO_TITLE,
+  QUARTERLY_REPORT_FINAL_DOCX_PUBLIC_PATH,
+  QUARTERLY_REPORT_FINAL_EDITOR_DOCUMENT_TITLE,
+  shouldUseQuarterlyReportDemo,
+} from '../constants/quarterly-report-flow-data';
+import { useIterationMode } from '../contexts/IterationModeContext';
 
 interface WorkspaceViewProps {
   initialInput: string;
@@ -413,17 +427,28 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   mountedKnowledgeBaseIds,
   onMountedKnowledgeBaseChange,
 }) => {
+  const { isIterationMode } = useIterationMode();
   const initialTask = taskId ? getTask(taskId) : null;
   const initialDocuments = buildInitialDocuments(initialTask);
   const initialActiveDocumentId = resolveInitialActiveDocumentId(initialTask, initialDocuments);
   const initialActiveDocument =
     initialDocuments.find((document) => document.id === initialActiveDocumentId) || null;
+  const initialSelectedTemplateId = initialTask?.selectedTemplateId;
+  const initialSelectedLocalWorkspace = initialTask?.selectedLocalWorkspace ?? null;
+  const initialQuarterlyReportDemoState =
+    initialTask?.quarterlyReportDemoState ?? createDefaultQuarterlyReportDemoState();
   const [mode, setMode] = useState<Mode>(initialTask?.mode ?? initialMode);
   const [writingState, setWritingState] = useState<WritingState>(
     initialTask?.writingState ?? WritingState.THINKING
   );
   const [input, setInput] = useState<string>('');
   const [submittedPrompt, setSubmittedPrompt] = useState<string>(initialTask?.input ?? initialInput);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>(
+    initialSelectedTemplateId
+  );
+  const [selectedLocalWorkspace, setSelectedLocalWorkspace] = useState<LocalWorkspaceSelection | null>(
+    initialSelectedLocalWorkspace
+  );
   const [currentScenarioId, setCurrentScenarioId] = useState<ScenarioId | undefined>(
     initialTask?.scenarioId ?? initialScenarioId
   );
@@ -468,6 +493,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   const [isCopilotResponding, setIsCopilotResponding] = useState<boolean>(false);
   const [isApplyingPendingEdit, setIsApplyingPendingEdit] = useState<boolean>(false);
   const [copilotProgress, setCopilotProgress] = useState<CopilotProgressState | null>(null);
+  const [quarterlyReportDemoState, setQuarterlyReportDemoState] =
+    useState<QuarterlyReportDemoState>(initialQuarterlyReportDemoState);
+  const [isQuarterlyReportDemoActive, setIsQuarterlyReportDemoActive] = useState<boolean>(() =>
+    isIterationMode &&
+    shouldUseQuarterlyReportDemo(initialTask?.input ?? initialInput, initialSelectedTemplateId)
+  );
   const currentTaskIdRef = useRef<string | null>(taskId || null);
   const activeDocumentIdRef = useRef<string | null>(initialActiveDocumentId);
   const generalRequestSeqRef = useRef(0);
@@ -486,6 +517,68 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     documents.find((document) => document.id === activeDocumentId) || null;
   const canExport =
     activeDocument?.status === 'finished' && content.trim().length > 0;
+
+  const promoteQuarterlyReportStep = useCallback((nextStep: number) => {
+    setQuarterlyReportDemoState((prev) => ({
+      ...prev,
+      currentStep: prev.currentStep >= nextStep ? prev.currentStep : Math.min(nextStep, 9),
+    }));
+  }, []);
+
+  const handleQuarterlyReportAnswer = useCallback(
+    (questionId: keyof QuarterlyReportSelectedAnswers, value: boolean) => {
+      setQuarterlyReportDemoState((prev) => ({
+        ...prev,
+        selectedAnswers: {
+          ...prev.selectedAnswers,
+          [questionId]: value,
+        },
+      }));
+    },
+    []
+  );
+
+  const handleQuarterlyReportNextStep = useCallback(() => {
+    setQuarterlyReportDemoState((prev) => {
+      if (prev.currentStep === 1) {
+        return { ...prev, currentStep: 2 };
+      }
+
+      if (prev.currentStep === 2) {
+        return { ...prev, currentStep: 3 };
+      }
+
+      if (prev.currentStep === 3) {
+        return { ...prev, currentStep: 4 };
+      }
+
+      if (
+        prev.currentStep === 4 &&
+        prev.selectedAnswers.reportingPeriod !== null &&
+        prev.selectedAnswers.includeMetrics !== null
+      ) {
+        return { ...prev, currentStep: 5 };
+      }
+
+      if (prev.currentStep === 5) {
+        return { ...prev, currentStep: 6 };
+      }
+
+      if (prev.currentStep === 6) {
+        return { ...prev, currentStep: 7 };
+      }
+
+      if (prev.currentStep === 7) {
+        return { ...prev, currentStep: 8 };
+      }
+
+      if (prev.currentStep === 8) {
+        return { ...prev, currentStep: 9 };
+      }
+
+      return prev;
+    });
+  }, []);
 
   const loadDocumentIntoEditor = useCallback((document: WritingDocument | null) => {
     setContent(stripSourceSupTags(document?.content || ''));
@@ -917,6 +1010,116 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   }, [canExport]);
 
   useEffect(() => {
+    if (!isQuarterlyReportDemoActive) {
+      return;
+    }
+
+    setHasInitialized(true);
+    setMode(Mode.GENERAL);
+    setCurrentScenarioId(undefined);
+    setAgentId(undefined);
+    setOutline('');
+    setIsGenerating(false);
+    setThinkingPhase(null);
+    setThinkingStatus('idle');
+    setThinkingContent('');
+    setPendingCopilotEdit(null);
+    setIsCopilotResponding(false);
+    setIsApplyingPendingEdit(false);
+    resetCopilotProgress();
+  }, [isQuarterlyReportDemoActive, resetCopilotProgress]);
+
+  useEffect(() => {
+    if (!isQuarterlyReportDemoActive || !quarterlyReportDemoState.autoPlay) {
+      return;
+    }
+
+    let timerId: number | null = null;
+
+    if (quarterlyReportDemoState.currentStep === 1) {
+      timerId = window.setTimeout(() => promoteQuarterlyReportStep(2), 900);
+    } else if (quarterlyReportDemoState.currentStep === 2) {
+      timerId = window.setTimeout(() => promoteQuarterlyReportStep(3), 700);
+    } else if (quarterlyReportDemoState.currentStep === 3) {
+      timerId = window.setTimeout(() => promoteQuarterlyReportStep(4), 700);
+    } else if (
+      quarterlyReportDemoState.currentStep === 4 &&
+      quarterlyReportDemoState.selectedAnswers.reportingPeriod !== null &&
+      quarterlyReportDemoState.selectedAnswers.includeMetrics !== null
+    ) {
+      timerId = window.setTimeout(() => promoteQuarterlyReportStep(5), 1200);
+    } else if (quarterlyReportDemoState.currentStep === 5) {
+      timerId = window.setTimeout(() => promoteQuarterlyReportStep(6), 2400);
+    } else if (quarterlyReportDemoState.currentStep === 6) {
+      timerId = window.setTimeout(() => promoteQuarterlyReportStep(7), 6200);
+    } else if (quarterlyReportDemoState.currentStep === 7) {
+      timerId = window.setTimeout(() => promoteQuarterlyReportStep(8), 5200);
+    } else if (quarterlyReportDemoState.currentStep === 8) {
+      timerId = window.setTimeout(() => promoteQuarterlyReportStep(9), 2600);
+    }
+
+    return () => {
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [
+    isQuarterlyReportDemoActive,
+    promoteQuarterlyReportStep,
+    quarterlyReportDemoState.autoPlay,
+    quarterlyReportDemoState.currentStep,
+    quarterlyReportDemoState.selectedAnswers.includeMetrics,
+    quarterlyReportDemoState.selectedAnswers.reportingPeriod,
+  ]);
+
+  useEffect(() => {
+    if (!isQuarterlyReportDemoActive) {
+      return;
+    }
+
+    const previewContent = buildQuarterlyReportPreviewMarkdown(
+      quarterlyReportDemoState.currentStep,
+      quarterlyReportDemoState.selectedAnswers
+    );
+    const nextDocumentTitle =
+      quarterlyReportDemoState.currentStep >= 9
+        ? QUARTERLY_REPORT_FINAL_EDITOR_DOCUMENT_TITLE
+        : QUARTERLY_REPORT_DEMO_TITLE;
+    const nextStatus: WritingDocumentStatus =
+      quarterlyReportDemoState.currentStep >= 9 ? 'finished' : 'generating';
+
+    setWritingState(
+      quarterlyReportDemoState.currentStep >= 9 ? WritingState.FINISHED : WritingState.GENERATING
+    );
+    setDocumentName(nextDocumentTitle);
+    setContent(previewContent);
+    setDocuments((prev) => {
+      const existingDocument = prev.find((document) => document.id === QUARTERLY_REPORT_DEMO_DOCUMENT_ID);
+      const nextDocument: WritingDocument = {
+        id: QUARTERLY_REPORT_DEMO_DOCUMENT_ID,
+        title: nextDocumentTitle,
+        content: previewContent,
+        prompt: submittedPrompt,
+        createdAt: existingDocument?.createdAt ?? Date.now(),
+        status: nextStatus,
+      };
+
+      const remainingDocuments = prev.filter(
+        (document) => document.id !== QUARTERLY_REPORT_DEMO_DOCUMENT_ID
+      );
+
+      return [nextDocument, ...remainingDocuments];
+    });
+    setActiveDocumentId(QUARTERLY_REPORT_DEMO_DOCUMENT_ID);
+    activeDocumentIdRef.current = QUARTERLY_REPORT_DEMO_DOCUMENT_ID;
+  }, [
+    isQuarterlyReportDemoActive,
+    quarterlyReportDemoState.currentStep,
+    quarterlyReportDemoState.selectedAnswers,
+    submittedPrompt,
+  ]);
+
+  useEffect(() => {
     if (!isExportMenuOpen) {
       return;
     }
@@ -968,6 +1171,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         setWritingState(task.writingState);
         setInput('');
         setSubmittedPrompt(task.input);
+        setSelectedTemplateId(task.selectedTemplateId);
+        setSelectedLocalWorkspace(task.selectedLocalWorkspace ?? null);
         setCurrentScenarioId(task.scenarioId);
         setGeneralContentSource('api');
         setDocuments(taskDocuments);
@@ -985,6 +1190,12 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         setOutline(task.outline);
         setMemoryConfig(task.memoryConfig || {});
         setParamsConfig(task.paramsConfig || {});
+        setQuarterlyReportDemoState(
+          task.quarterlyReportDemoState ?? createDefaultQuarterlyReportDemoState()
+        );
+        setIsQuarterlyReportDemoActive(
+          isIterationMode && shouldUseQuarterlyReportDemo(task.input, task.selectedTemplateId)
+        );
         setMessages(
           (task.messages || []).map((m) => ({
             role: m.role,
@@ -1003,7 +1214,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     } else {
       currentTaskIdRef.current = null;
     }
-  }, [taskId, resetCopilotProgress]);
+  }, [taskId, resetCopilotProgress, isIterationMode]);
 
   const saveCurrentTask = useCallback(() => {
     if (currentTaskIdRef.current) {
@@ -1011,6 +1222,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         mode,
         writingState,
         input: submittedPrompt,
+        selectedTemplateId,
+        selectedLocalWorkspace,
         content,
         documentName,
         outline,
@@ -1021,12 +1234,15 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         messages: messages.length > 0 ? messages : [],
         scenarioId: currentScenarioId,
         generalContentSource,
+        quarterlyReportDemoState: isQuarterlyReportDemoActive ? quarterlyReportDemoState : undefined,
       });
     }
   }, [
     mode,
     writingState,
     submittedPrompt,
+    selectedTemplateId,
+    selectedLocalWorkspace,
     content,
     documentName,
     outline,
@@ -1037,6 +1253,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
     messages,
     currentScenarioId,
     generalContentSource,
+    isQuarterlyReportDemoActive,
+    quarterlyReportDemoState,
   ]);
 
   const handleBack = useCallback(() => {
@@ -1079,6 +1297,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   });
 
   useEffect(() => {
+    if (isQuarterlyReportDemoActive) {
+      setHasInitialized(true);
+      return;
+    }
+
     if (taskId) {
       const task = getTask(taskId);
       if (task) {
@@ -1101,9 +1324,22 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         setWritingState(WritingState.INPUT);
       }
     }
-  }, [initialInput, hasInitialized, writingState, mode, taskId, runGeneralFlow, scenarioData]);
+  }, [
+    initialInput,
+    hasInitialized,
+    writingState,
+    mode,
+    taskId,
+    runGeneralFlow,
+    scenarioData,
+    isQuarterlyReportDemoActive,
+  ]);
 
   useEffect(() => {
+    if (isQuarterlyReportDemoActive) {
+      return;
+    }
+
     if (input.includes('@') && mode === Mode.GENERAL) {
       setMode(Mode.AGENT);
       setWritingState(WritingState.INPUT);
@@ -1111,7 +1347,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         setAgentId(scenarioData.agentConfig.id);
       }
     }
-  }, [input, mode, scenarioData]);
+  }, [input, mode, scenarioData, isQuarterlyReportDemoActive]);
 
   useEffect(() => {
     if (mode === Mode.AGENT && !agentId && scenarioData) {
@@ -1366,6 +1602,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   }
 
   function handleSendQuery() {
+    if (isQuarterlyReportDemoActive) {
+      return;
+    }
+
     const query = input.trim();
     if (!query) {
       return;
@@ -1957,6 +2197,21 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       const fallbackTitle = documentName.trim() || '文档';
 
       try {
+        if (
+          format === 'word' &&
+          isQuarterlyReportDemoActive &&
+          quarterlyReportDemoState.currentStep >= 9
+        ) {
+          const link = document.createElement('a');
+          link.href = QUARTERLY_REPORT_FINAL_DOCX_PUBLIC_PATH;
+          link.download = QUARTERLY_REPORT_FINAL_EDITOR_DOCUMENT_TITLE;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setMessages((prev) => [...prev, { role: 'ai', content: '已导出 Word 文件。' }]);
+          return;
+        }
+
         await exportDocument(
           {
             title: fallbackTitle,
@@ -1972,8 +2227,27 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         setIsExporting(false);
       }
     },
-    [canExport, content, documentName, isExporting]
+    [
+      canExport,
+      content,
+      documentName,
+      isExporting,
+      isQuarterlyReportDemoActive,
+      quarterlyReportDemoState.currentStep,
+    ]
   );
+
+  const customQuarterlyReportChat = isQuarterlyReportDemoActive ? (
+    <QuarterlyReportConversationFlow
+      currentStep={quarterlyReportDemoState.currentStep}
+      autoPlay={quarterlyReportDemoState.autoPlay}
+      selectedAnswers={quarterlyReportDemoState.selectedAnswers}
+      mountedKnowledgeBaseIds={mountedKnowledgeBaseIds}
+      selectedLocalWorkspace={selectedLocalWorkspace}
+      onNextStep={handleQuarterlyReportNextStep}
+      onAnswerQuestion={handleQuarterlyReportAnswer}
+    />
+  ) : null;
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
@@ -1988,7 +2262,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
 
         <div className="flex-1">
           <select className="text-sm font-medium text-gray-700 bg-transparent border-none focus:outline-none cursor-pointer">
-            <option>{mode === Mode.GENERAL ? '通用写作智能体' : scenarioData?.agentConfig?.name || '通用写作智能体'}</option>
+            <option>
+              {isQuarterlyReportDemoActive
+                ? '产品组季度工作汇报'
+                : mode === Mode.GENERAL
+                  ? '通用写作智能体'
+                  : scenarioData?.agentConfig?.name || '通用写作智能体'}
+            </option>
           </select>
         </div>
       </div>
@@ -2016,13 +2296,15 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                   <span className="text-sm font-medium text-gray-700" style={{ whiteSpace: 'nowrap', overflow: 'visible' }}>
                     {documentName}
                   </span>
-                  <button
-                    onClick={() => setIsEditingName(true)}
-                    className="p-1 hover:bg-gray-100 rounded flex-shrink-0"
-                    title="编辑文档名"
-                  >
-                    <Edit2 className="w-3 h-3 text-gray-400" />
-                  </button>
+                  {!isQuarterlyReportDemoActive ? (
+                    <button
+                      onClick={() => setIsEditingName(true)}
+                      className="p-1 hover:bg-gray-100 rounded flex-shrink-0"
+                      title="编辑文档名"
+                    >
+                      <Edit2 className="w-3 h-3 text-gray-400" />
+                    </button>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -2067,23 +2349,30 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
           </div>
 
           <div className="flex-1 overflow-hidden">
-            <Editor
-              content={content}
-              writingState={writingState}
-              onStopGenerate={handleStopGeneration}
-              onContentChange={(newContent) => {
-                if (pendingCopilotEdit) {
-                  setPendingCopilotEdit(null);
-                }
-                setContent(newContent);
-                if (activeDocumentIdRef.current) {
-                  applyDocumentPatch(activeDocumentIdRef.current, {
-                    content: newContent,
-                  });
-                }
-              }}
-              onRewriteRequest={handleRewriteRequest}
-            />
+            {isQuarterlyReportDemoActive ? (
+              <QuarterlyReportPreviewPanel
+                currentStep={quarterlyReportDemoState.currentStep}
+                previewContent={content}
+              />
+            ) : (
+              <Editor
+                content={content}
+                writingState={writingState}
+                onStopGenerate={handleStopGeneration}
+                onContentChange={(newContent) => {
+                  if (pendingCopilotEdit) {
+                    setPendingCopilotEdit(null);
+                  }
+                  setContent(newContent);
+                  if (activeDocumentIdRef.current) {
+                    applyDocumentPatch(activeDocumentIdRef.current, {
+                      content: newContent,
+                    });
+                  }
+                }}
+                onRewriteRequest={handleRewriteRequest}
+              />
+            )}
           </div>
         </div>
 
@@ -2126,9 +2415,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
             onConfirmAgentWrite={handleConfirmAgentWrite}
             onCancelAgentWrite={handleCancelAgentWrite}
             onDocumentSelect={selectDocument}
-            onDocumentDelete={deleteDocument}
+            onDocumentDelete={isQuarterlyReportDemoActive ? undefined : deleteDocument}
             mountedKnowledgeBaseIds={mountedKnowledgeBaseIds}
             onMountedKnowledgeBaseChange={onMountedKnowledgeBaseChange}
+            customChatContent={customQuarterlyReportChat}
+            hideInputArea={isQuarterlyReportDemoActive}
           />
         </div>
       </div>
