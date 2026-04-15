@@ -104,7 +104,7 @@ npm run preview
 
 | 变量 | 默认值（代码） | 说明 |
 | --- | --- | --- |
-| `APPFORGE_BASE_URL` | `http://110.154.34.22:37755/appforge/openapi/v1` | 工作流调用基地址 |
+| `APPFORGE_BASE_URL` | `http://58.19.19.197:9080/appforge/openapi/v1` | 工作流调用基地址 |
 | `APPFORGE_REPORT_COMPILE_APP_ID` | `app-6p23bh2c` | Osint开源情报整编智能体 appId |
 | `APPFORGE_REPORT_COMPILE_TOKEN` | 内置默认 token | Osint开源情报整编智能体 token |
 | `APPFORGE_OFFICIAL_DOC_APP_ID` | `app-nj4mkuyx` | 公文写作智能体 appId |

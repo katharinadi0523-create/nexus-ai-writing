@@ -56,7 +56,7 @@ interface QwenChatResponse {
 }
 
 const APPFORGE_BASE_URL =
-  process.env.APPFORGE_BASE_URL || 'http://110.154.34.22:37755/appforge/openapi/v1';
+  process.env.APPFORGE_BASE_URL || 'http://58.19.19.197:9080/appforge/openapi/v1';
 
 const APPFORGE_DEFAULT_TOKEN = '6b9dbe0086d15f7da69c34573af37de1';
 
