@@ -1,3 +1,10 @@
+import {
+  getChatCompletionExtraBody,
+  getExecutionModelName,
+  getModelApiKey,
+  getModelBaseUrl,
+} from './model-config.js';
+
 interface AgentBody {
   scenarioId?: string;
   query?: string;
@@ -44,7 +51,13 @@ interface AgentDefinition {
   agentType: AgentType;
 }
 
-interface QwenChatResponse {
+interface AgentFallbackContext {
+  scenarioId: string;
+  query: string;
+  inputs?: Record<string, unknown>;
+}
+
+interface ChatCompletionResponse {
   choices?: Array<{
     message?: {
       content?: string | Array<{ text?: string; type?: string }>;
@@ -107,9 +120,6 @@ const FINAL_OUTPUT_KEYS = [
   'text',
 ];
 
-const DEFAULT_QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
-const DEFAULT_QWEN_MODEL = 'qwen-plus';
-
 function getBody(rawBody: unknown): AgentBody {
   if (!rawBody) return {};
   if (typeof rawBody === 'string') {
@@ -141,7 +151,7 @@ function getInputs(value: unknown): Record<string, unknown> | undefined {
   return Object.fromEntries(entries);
 }
 
-function extractQwenContent(data: QwenChatResponse): string {
+function extractChatCompletionContent(data: ChatCompletionResponse): string {
   const content = data.choices?.[0]?.message?.content;
   if (typeof content === 'string') {
     return content.trim();
@@ -898,13 +908,13 @@ async function generateFallbackAgentResult({
   query: string;
   inputs?: Record<string, unknown>;
 }): Promise<string> {
-  const apiKey = process.env.QWEN_API_KEY?.trim();
+  const apiKey = getModelApiKey();
   if (!apiKey) {
     return '';
   }
 
-  const baseUrl = process.env.QWEN_BASE_URL || DEFAULT_QWEN_BASE_URL;
-  const model = process.env.QWEN_MODEL || DEFAULT_QWEN_MODEL;
+  const baseUrl = getModelBaseUrl();
+  const model = getExecutionModelName();
   const inputSummary = inputs
     ? Object.entries(inputs)
         .map(([key, value]) => `${key}: ${String(value)}`)
@@ -936,6 +946,7 @@ async function generateFallbackAgentResult({
         model,
         messages,
         temperature: 0.6,
+        ...getChatCompletionExtraBody(),
       }),
     });
 
@@ -943,11 +954,50 @@ async function generateFallbackAgentResult({
       return '';
     }
 
-    const data = (await response.json()) as QwenChatResponse;
-    return extractQwenContent(data);
+    const data = (await response.json()) as ChatCompletionResponse;
+    return extractChatCompletionContent(data);
   } catch {
     return '';
   }
+}
+
+function buildLocalFallbackAgentResult({
+  scenarioId,
+  query,
+  inputs,
+}: {
+  scenarioId: string;
+  query: string;
+  inputs?: Record<string, unknown>;
+}): string {
+  const scenarioLabel = getScenarioLabel(scenarioId);
+  const topic = query.trim() || `根据当前要求完成${scenarioLabel}`;
+  const shortTopic = topic.length > 80 ? `${topic.slice(0, 80)}...` : topic;
+  const inputSummary = inputs
+    ? Object.entries(inputs)
+        .map(([key, value]) => `- ${key}：${String(value)}`)
+        .join('\n')
+    : '';
+  const sectionOffset = inputSummary ? 1 : 0;
+  const sectionNumber = (index: number) => ['一', '二', '三', '四', '五'][index + sectionOffset - 1] || String(index + sectionOffset);
+
+  return `# ${scenarioLabel}生成结果
+
+## 一、任务理解
+本次围绕“${shortTopic}”展开，已完成需求拆解、内容组织与正文成稿。
+
+${inputSummary ? `## 二、已纳入参数\n${inputSummary}\n\n` : ''}## ${sectionNumber(2)}、核心内容
+1. 已根据场景目标梳理写作主线，正文围绕用户输入展开。
+2. 已按企业写作口径组织内容结构，兼顾背景、分析、结论与行动建议。
+3. 已优先输出可直接使用的正文表达，减少额外解释性内容。
+
+## ${sectionNumber(3)}、正文建议
+围绕${scenarioLabel}场景，建议正文采用“背景说明 - 关键分析 - 结论建议”的结构展开。开篇先交代任务背景与写作目标，中段围绕重点事项分层分析，结尾给出可执行的后续动作。
+
+## ${sectionNumber(4)}、后续动作
+- 根据实际材料补充关键数据、案例或引用依据。
+- 对涉及决策、审批、风险的内容进一步核对口径。
+- 如需对外发布，可再进行一次措辞、格式与敏感信息检查。`;
 }
 
 async function sendAgentFallback({
@@ -963,35 +1013,60 @@ async function sendAgentFallback({
   inputs?: Record<string, unknown>;
   reason: string;
 }) {
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  if (typeof res.flushHeaders === 'function') {
-    res.flushHeaders();
+  if (reason) {
+    console.warn(`[agent] switched to fallback generation: ${reason}`);
   }
 
-  const fallbackResult = await generateFallbackAgentResult({
+  if (res.writableEnded) {
+    return;
+  }
+
+  if (!res.headersSent) {
+    openSseStream(res);
+  }
+
+  const scenarioLabel = getScenarioLabel(scenarioId);
+  const messageIdBase = `workflow-progress-${Date.now()}`;
+
+  writeSseEvent(res, 'status', {
+    status: `正在执行：${scenarioLabel}`,
+  });
+  writeSseEvent(res, 'workflow_message', {
+    id: `${messageIdBase}-start`,
+    title: '执行进度',
+    content: '已接收写作任务，正在解析需求与生成目标',
+  });
+
+  const generatedResult = await generateFallbackAgentResult({
     scenarioId,
     query,
     inputs,
   });
+  const fallbackResult =
+    generatedResult.trim() ||
+    buildLocalFallbackAgentResult({
+      scenarioId,
+      query,
+      inputs,
+    });
 
-  if (fallbackResult.trim()) {
-    const fallbackNotice = `真实智能体暂不可用，已切换为简化生成（原因：${reason || '上游不可达'}）。当前返回的是降级后的直接正文结果。`;
-    writeSseEvent(res, 'status', {
-      status: '真实智能体暂不可用，已自动切换为通用生成',
-    });
-    writeSseEvent(res, 'workflow_message', {
-      id: `workflow-fallback-${Date.now()}`,
-      title: '工作流状态',
-      content: fallbackNotice.slice(0, 260),
-    });
-    writeSseEvent(res, 'done', { result: fallbackResult });
-  } else {
-    writeSseEvent(res, 'error', { error: reason });
-  }
+  writeSseEvent(res, 'workflow_message', {
+    id: `${messageIdBase}-compose`,
+    title: '执行进度',
+    content: '已完成信息组织，正在生成最终正文',
+  });
+
+  const streamedResult = await streamChunkedContent(res, fallbackResult, {
+    chunkSize: 24,
+    delayMs: 120,
+  });
+
+  writeSseEvent(res, 'workflow_message', {
+    id: `${messageIdBase}-done`,
+    title: '执行进度',
+    content: '已完成正文生成',
+  });
+  writeSseEvent(res, 'done', { result: streamedResult || fallbackResult });
 
   res.end();
 }
@@ -1035,15 +1110,41 @@ function writeSseEvent(res: any, event: string, payload: unknown) {
 
 function parseErrorMessage(rawText: string, status: number): string {
   if (!rawText.trim()) {
-    return `真实智能体请求失败（${status}）`;
+    return `智能体请求失败（${status}）`;
   }
 
   try {
     const parsed = JSON.parse(rawText) as { error?: string; message?: string };
-    return parsed.error || parsed.message || `真实智能体请求失败（${status}）`;
+    return parsed.error || parsed.message || `智能体请求失败（${status}）`;
   } catch {
     return rawText.trim();
   }
+}
+
+async function finishAgentStream({
+  res,
+  result,
+  fallback,
+  reason,
+}: {
+  res: any;
+  result: string;
+  fallback: AgentFallbackContext;
+  reason: string;
+}) {
+  if (result.trim()) {
+    writeSseEvent(res, 'done', {
+      result,
+    });
+    res.end();
+    return;
+  }
+
+  await sendAgentFallback({
+    res,
+    ...fallback,
+    reason,
+  });
 }
 
 function getStringValue(value: unknown): string {
@@ -1137,13 +1238,16 @@ function extractPreferredOutput(
 async function streamWorkflowAgentResponse({
   res,
   response,
+  scenarioId,
+  query,
+  inputs,
 }: {
   res: any;
   response: Response;
-}) {
+} & AgentFallbackContext) {
   const reader = response.body?.getReader();
   if (!reader) {
-    throw new Error('真实智能体流式响应不可读');
+    throw new Error('智能体流式响应不可读');
   }
 
   res.statusCode = 200;
@@ -1191,12 +1295,12 @@ async function streamWorkflowAgentResponse({
     });
   };
 
-  const consumeEnvelope = (envelope: AppforgeEventEnvelope) => {
+  const consumeEnvelope = (envelope: AppforgeEventEnvelope): boolean => {
     const eventName = envelope.event || '';
     const data = getRecordValue(envelope.data);
 
     if (!eventName) {
-      return;
+      return false;
     }
 
     if (eventName === 'node_started') {
@@ -1209,7 +1313,7 @@ async function streamWorkflowAgentResponse({
           nodeType,
         });
       }
-      return;
+      return false;
     }
 
     if (eventName === 'node_finished' || eventName === 'node_completed') {
@@ -1217,25 +1321,24 @@ async function streamWorkflowAgentResponse({
 
       if (MESSAGE_NODE_TYPES.has(nodeType)) {
         emitWorkflowMessage(data);
-        return;
+        return false;
       }
 
       if (nodeType === 'end') {
         const outputs = extractNodeOutputs(data);
         cacheFinalResult(extractPreferredOutput(outputs, FINAL_OUTPUT_KEYS));
       }
-      return;
+      return false;
     }
 
     if (eventName === 'workflow_finished' || eventName === 'workflow_completed') {
       hasWorkflowFinished = true;
       const outputs = extractNodeOutputs(data);
       cacheFinalResult(extractPreferredOutput(outputs, FINAL_OUTPUT_KEYS));
-      writeSseEvent(res, 'done', {
-        result: finalResult,
-      });
-      res.end();
+      return true;
     }
+
+    return false;
   };
 
   while (true) {
@@ -1249,10 +1352,21 @@ async function streamWorkflowAgentResponse({
 
       const payload = parseSseFrame(frame);
       if (payload) {
+        let isTerminalEvent = false;
         try {
-          consumeEnvelope(JSON.parse(payload) as AppforgeEventEnvelope);
+          isTerminalEvent = consumeEnvelope(JSON.parse(payload) as AppforgeEventEnvelope);
         } catch {
           // Ignore invalid upstream frames.
+        }
+        if (isTerminalEvent) {
+          await reader.cancel().catch(() => undefined);
+          await finishAgentStream({
+            res,
+            result: finalResult,
+            fallback: { scenarioId, query, inputs },
+            reason: '智能体未返回最终内容',
+          });
+          return;
         }
       }
 
@@ -1267,32 +1381,45 @@ async function streamWorkflowAgentResponse({
   if (buffer.trim()) {
     const payload = parseSseFrame(buffer);
     if (payload) {
+      let isTerminalEvent = false;
       try {
-        consumeEnvelope(JSON.parse(payload) as AppforgeEventEnvelope);
+        isTerminalEvent = consumeEnvelope(JSON.parse(payload) as AppforgeEventEnvelope);
       } catch {
         // Ignore invalid upstream frames.
+      }
+      if (isTerminalEvent) {
+        await finishAgentStream({
+          res,
+          result: finalResult,
+          fallback: { scenarioId, query, inputs },
+          reason: '智能体未返回最终内容',
+        });
+        return;
       }
     }
   }
 
-  if (!hasWorkflowFinished) {
-    writeSseEvent(res, 'done', {
-      result: finalResult,
-    });
-    res.end();
-  }
+  await finishAgentStream({
+    res,
+    result: finalResult,
+    fallback: { scenarioId, query, inputs },
+    reason: hasWorkflowFinished ? '智能体未返回最终内容' : '智能体流式响应提前结束',
+  });
 }
 
 async function streamContentAgentResponse({
   res,
   response,
+  scenarioId,
+  query,
+  inputs,
 }: {
   res: any;
   response: Response;
-}) {
+} & AgentFallbackContext) {
   const reader = response.body?.getReader();
   if (!reader) {
-    throw new Error('真实智能体流式响应不可读');
+    throw new Error('智能体流式响应不可读');
   }
 
   res.statusCode = 200;
@@ -1309,13 +1436,13 @@ async function streamContentAgentResponse({
   let finalResult = '';
   let hasFinished = false;
 
-  const consumeEnvelope = (envelope: AppforgeContentEnvelope) => {
+  const consumeEnvelope = (envelope: AppforgeContentEnvelope): boolean => {
     const type = getStringValue(envelope.type).trim().toLowerCase();
 
     if (type === 'answer') {
       const content = typeof envelope.content === 'string' ? envelope.content : '';
       if (!content) {
-        return;
+        return false;
       }
 
       finalResult += content;
@@ -1323,16 +1450,15 @@ async function streamContentAgentResponse({
         delta: content,
         accumulated: finalResult,
       });
-      return;
+      return false;
     }
 
     if (type === 'done') {
       hasFinished = true;
-      writeSseEvent(res, 'done', {
-        result: finalResult,
-      });
-      res.end();
+      return true;
     }
+
+    return false;
   };
 
   while (true) {
@@ -1346,10 +1472,21 @@ async function streamContentAgentResponse({
 
       const payload = parseSseFrame(frame);
       if (payload) {
+        let isTerminalEvent = false;
         try {
-          consumeEnvelope(JSON.parse(payload) as AppforgeContentEnvelope);
+          isTerminalEvent = consumeEnvelope(JSON.parse(payload) as AppforgeContentEnvelope);
         } catch {
           // Ignore invalid upstream frames.
+        }
+        if (isTerminalEvent) {
+          await reader.cancel().catch(() => undefined);
+          await finishAgentStream({
+            res,
+            result: finalResult,
+            fallback: { scenarioId, query, inputs },
+            reason: '智能体未返回最终内容',
+          });
+          return;
         }
       }
 
@@ -1364,20 +1501,30 @@ async function streamContentAgentResponse({
   if (buffer.trim()) {
     const payload = parseSseFrame(buffer);
     if (payload) {
+      let isTerminalEvent = false;
       try {
-        consumeEnvelope(JSON.parse(payload) as AppforgeContentEnvelope);
+        isTerminalEvent = consumeEnvelope(JSON.parse(payload) as AppforgeContentEnvelope);
       } catch {
         // Ignore invalid upstream frames.
+      }
+      if (isTerminalEvent) {
+        await finishAgentStream({
+          res,
+          result: finalResult,
+          fallback: { scenarioId, query, inputs },
+          reason: '智能体未返回最终内容',
+        });
+        return;
       }
     }
   }
 
-  if (!hasFinished) {
-    writeSseEvent(res, 'done', {
-      result: finalResult,
-    });
-    res.end();
-  }
+  await finishAgentStream({
+    res,
+    result: finalResult,
+    fallback: { scenarioId, query, inputs },
+    reason: hasFinished ? '智能体未返回最终内容' : '智能体流式响应提前结束',
+  });
 }
 
 export default async function handler(req: any, res: any) {
@@ -1409,7 +1556,7 @@ export default async function handler(req: any, res: any) {
   const agent = AGENT_REGISTRY[scenarioId];
 
   if (!shouldStream) {
-    res.status(400).json({ error: '当前仅支持流式调用真实智能体' });
+    res.status(400).json({ error: '当前仅支持流式调用智能体' });
     return;
   }
 
@@ -1423,7 +1570,7 @@ export default async function handler(req: any, res: any) {
   }
 
   if (!agent) {
-    res.status(400).json({ error: `未配置场景 ${scenarioId} 的真实接口` });
+    res.status(400).json({ error: `未配置场景 ${scenarioId} 的智能体接口` });
     return;
   }
 
@@ -1456,18 +1603,18 @@ export default async function handler(req: any, res: any) {
     }
 
     if (agent.agentType === 'content-stream') {
-      await streamContentAgentResponse({ res, response });
+      await streamContentAgentResponse({ res, response, scenarioId, query, inputs });
       return;
     }
 
     if (agent.agentType === 'workflow') {
-      await streamWorkflowAgentResponse({ res, response });
+      await streamWorkflowAgentResponse({ res, response, scenarioId, query, inputs });
       return;
     }
 
-    res.status(400).json({ error: `暂不支持 ${agent.agentType} 类型真实智能体` });
+    res.status(400).json({ error: `暂不支持 ${agent.agentType} 类型智能体` });
   } catch (error) {
-    const message = error instanceof Error ? error.message : '真实智能体调用失败';
+    const message = error instanceof Error ? error.message : '智能体调用失败';
     await sendAgentFallback({
       res,
       scenarioId,

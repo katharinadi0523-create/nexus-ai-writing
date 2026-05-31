@@ -1,4 +1,14 @@
-interface QwenChatResponse {
+import {
+  getChatCompletionExtraBody,
+  getExecutionModelName,
+  getMissingApiKeyMessage,
+  getModelApiKey,
+  getModelBaseUrl,
+  getModelRequestErrorMessage,
+  getRouteModelName,
+} from './model-config.js';
+
+interface ChatCompletionResponse {
   choices?: Array<{
     message?: {
       content?: string | Array<{ text?: string; type?: string }>;
@@ -82,9 +92,6 @@ interface DocumentSection {
   text: string;
 }
 
-const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
-const DEFAULT_EXECUTION_MODEL = 'qwen-plus';
-const DEFAULT_ROUTE_MODEL = 'qwen-turbo';
 const DEFAULT_ROUTE_REPLY = '我先判断一下你的意图。';
 const DEFAULT_RESTART_REPLY = '可以，我会按这个新主题重新开始生成。';
 const DEFAULT_AGENT_RELATED_REPLY = '我将使用当前智能体继续生成这个主题。';
@@ -343,7 +350,7 @@ function buildDeterministicRewriteFallback(targetText: string, instruction: stri
   return rewrittenBody.trim();
 }
 
-function extractContent(data: QwenChatResponse): string {
+function extractContent(data: ChatCompletionResponse): string {
   const content = data.choices?.[0]?.message?.content;
   if (typeof content === 'string') return content.trim();
   if (Array.isArray(content)) {
@@ -577,10 +584,10 @@ function validateEditResponseAgainstDocument(
 
 async function parseErrorResponse(response: Response): Promise<string> {
   try {
-    const data = (await response.json()) as QwenChatResponse;
-    return data.error?.message || `Qwen API 请求失败（${response.status}）`;
+    const data = (await response.json()) as ChatCompletionResponse;
+    return data.error?.message || getModelRequestErrorMessage(response.status);
   } catch {
-    return `Qwen API 请求失败（${response.status}）`;
+    return getModelRequestErrorMessage(response.status);
   }
 }
 
@@ -1281,6 +1288,7 @@ async function requestModelOutput({
           model,
           messages,
           temperature,
+          ...getChatCompletionExtraBody(),
           ...(typeof maxTokens === 'number' && maxTokens > 0
             ? {
                 max_tokens: Math.floor(maxTokens),
@@ -1302,7 +1310,7 @@ async function requestModelOutput({
     throw new Error(errorMessage);
   }
 
-  const data = (await response.json()) as QwenChatResponse;
+  const data = (await response.json()) as ChatCompletionResponse;
   const output = extractContent(data);
   if (!output) {
     throw new Error('模型未返回有效结果');
@@ -1379,9 +1387,9 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const apiKey = process.env.QWEN_API_KEY;
+  const apiKey = getModelApiKey();
   if (!apiKey) {
-    res.status(500).json({ error: '服务端未配置 QWEN_API_KEY' });
+    res.status(500).json({ error: getMissingApiKeyMessage() });
     return;
   }
 
@@ -1404,10 +1412,9 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const baseUrl = process.env.QWEN_BASE_URL || DEFAULT_BASE_URL;
-  const executionModel = process.env.QWEN_MODEL || DEFAULT_EXECUTION_MODEL;
-  const routeModel =
-    process.env.COPILOT_ROUTE_MODEL || process.env.QWEN_ROUTE_MODEL || DEFAULT_ROUTE_MODEL;
+  const baseUrl = getModelBaseUrl();
+  const executionModel = getExecutionModelName();
+  const routeModel = getRouteModelName();
   const routeTimeoutMs = parsePositiveInt(
     process.env.COPILOT_ROUTE_TIMEOUT_MS,
     DEFAULT_ROUTE_TIMEOUT_MS

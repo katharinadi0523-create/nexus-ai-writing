@@ -84,9 +84,9 @@ function getBoundaryLength(buffer: string, index: number): number {
 async function parseErrorResponse(response: Response): Promise<string> {
   try {
     const data = (await response.json()) as ErrorResponse;
-    return data.error || `真实智能体请求失败（${response.status}）`;
+    return data.error || `智能体请求失败（${response.status}）`;
   } catch {
-    return `真实智能体请求失败（${response.status}）`;
+    return `智能体请求失败（${response.status}）`;
   }
 }
 
@@ -193,13 +193,13 @@ export async function streamAgent({
 
       if (parsed.event === 'error') {
         const payload = JSON.parse(parsed.data) as StreamErrorPayload;
-        throw new Error(payload.error || '真实智能体调用失败');
+        throw new Error(payload.error || '智能体调用失败');
       }
     } catch (error) {
       if (error instanceof Error) {
         throw error;
       }
-      throw new Error('真实智能体流式响应解析失败');
+      throw new Error('智能体流式响应解析失败');
     }
   };
 

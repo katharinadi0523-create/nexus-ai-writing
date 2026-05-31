@@ -1,6 +1,14 @@
 import { getKnowledgeBaseContext } from './knowledge-base-service.js';
+import {
+  getChatCompletionExtraBody,
+  getExecutionModelName,
+  getMissingApiKeyMessage,
+  getModelApiKey,
+  getModelBaseUrl,
+  getModelRequestErrorMessage,
+} from './model-config.js';
 
-interface QwenChatResponse {
+interface ChatCompletionResponse {
   choices?: Array<{
     message?: {
       content?: string | Array<{ text?: string; type?: string }>;
@@ -48,14 +56,12 @@ function handleCors(req: any, res: any): boolean {
   return false;
 }
 
-const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
-const DEFAULT_MODEL = 'qwen-plus';
-const DEFAULT_QWEN_TIMEOUT_MS = 180000;
+const DEFAULT_MODEL_TIMEOUT_MS = 180000;
 const OUTLINE_KB_TOTAL_TOP_K = 3;
 const OUTLINE_KB_MAX_CONTEXT_CHARS = 3000;
 const OUTLINE_KB_MAX_CHUNK_CHARS = 700;
 
-function extractContent(data: QwenChatResponse): string {
+function extractContent(data: ChatCompletionResponse): string {
   const content = data.choices?.[0]?.message?.content;
   if (typeof content === 'string') return content.trim();
   if (Array.isArray(content)) {
@@ -64,7 +70,7 @@ function extractContent(data: QwenChatResponse): string {
   return '';
 }
 
-function extractDelta(data: QwenChatResponse): string {
+function extractDelta(data: ChatCompletionResponse): string {
   const content = data.choices?.[0]?.delta?.content;
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -73,7 +79,7 @@ function extractDelta(data: QwenChatResponse): string {
   return '';
 }
 
-function extractReasoningDelta(data: QwenChatResponse): string {
+function extractReasoningDelta(data: ChatCompletionResponse): string {
   const content = data.choices?.[0]?.delta?.reasoning_content;
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -281,10 +287,10 @@ function getMessages(
 
 async function parseErrorResponse(response: Response): Promise<string> {
   try {
-    const data = (await response.json()) as QwenChatResponse;
-    return data.error?.message || `Qwen API 请求失败（${response.status}）`;
+    const data = (await response.json()) as ChatCompletionResponse;
+    return data.error?.message || getModelRequestErrorMessage(response.status);
   } catch {
-    return `Qwen API 请求失败（${response.status}）`;
+    return getModelRequestErrorMessage(response.status);
   }
 }
 
@@ -315,7 +321,7 @@ async function fetchWithTimeout(
   }
 }
 
-async function requestQwenChatCompletion({
+async function requestChatCompletion({
   baseUrl,
   apiKey,
   model,
@@ -345,11 +351,7 @@ async function requestQwenChatCompletion({
         messages,
         temperature: action === 'outline' ? 0.5 : action === 'thought' ? 0.6 : 0.7,
         stream: shouldStream,
-        ...(action === 'article'
-          ? {
-              enable_thinking: true,
-            }
-          : {}),
+        ...getChatCompletionExtraBody(),
       }),
     },
     timeoutMs
@@ -424,7 +426,7 @@ async function streamArticleResponse({
     }
 
     try {
-      const parsed = JSON.parse(payload) as QwenChatResponse;
+      const parsed = JSON.parse(payload) as ChatCompletionResponse;
       if (parsed.error?.message) {
         streamError = parsed.error.message;
         return;
@@ -533,7 +535,7 @@ async function streamThoughtResponse({
     }
 
     try {
-      const parsed = JSON.parse(payload) as QwenChatResponse;
+      const parsed = JSON.parse(payload) as ChatCompletionResponse;
       if (parsed.error?.message) {
         streamError = parsed.error.message;
         return;
@@ -599,9 +601,9 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const apiKey = process.env.QWEN_API_KEY;
+  const apiKey = getModelApiKey();
   if (!apiKey) {
-    res.status(500).json({ error: '服务端未配置 QWEN_API_KEY' });
+    res.status(500).json({ error: getMissingApiKeyMessage() });
     return;
   }
 
@@ -635,11 +637,11 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const baseUrl = process.env.QWEN_BASE_URL || DEFAULT_BASE_URL;
-  const model = process.env.QWEN_MODEL || DEFAULT_MODEL;
+  const baseUrl = getModelBaseUrl();
+  const model = getExecutionModelName();
   const timeoutMs = parseTimeoutMs(
     process.env.QWEN_REQUEST_TIMEOUT_MS,
-    DEFAULT_QWEN_TIMEOUT_MS
+    DEFAULT_MODEL_TIMEOUT_MS
   );
 
   try {
@@ -683,7 +685,7 @@ export default async function handler(req: any, res: any) {
 
     let response: Response;
     try {
-      response = await requestQwenChatCompletion({
+      response = await requestChatCompletion({
         baseUrl,
         apiKey,
         model,
@@ -700,7 +702,7 @@ export default async function handler(req: any, res: any) {
               '[write] outline request timed out with knowledge-base context, retrying without context'
             );
             const fallbackMessages = getMessages(action, prompt, outline, phase, '');
-            response = await requestQwenChatCompletion({
+            response = await requestChatCompletion({
               baseUrl,
               apiKey,
               model,
@@ -741,7 +743,7 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const data = (await response.json()) as QwenChatResponse;
+    const data = (await response.json()) as ChatCompletionResponse;
     const output = extractContent(data);
     const result =
       action === 'outline'

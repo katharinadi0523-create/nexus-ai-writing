@@ -55,12 +55,12 @@ npm install
 
 ### 2. 配置环境变量
 
-在项目根目录创建 `.env.local`（至少配置 `QWEN_API_KEY`）：
+在项目根目录创建 `.env.local`（至少配置 `ARK_API_KEY`）：
 
 ```bash
-QWEN_API_KEY=your_api_key
-QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-QWEN_MODEL=qwen-plus
+ARK_API_KEY=your_api_key
+ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/plan/v3
+ARK_MODEL=glm-5.1
 ```
 
 ### 3. 启动开发
@@ -84,21 +84,24 @@ npm run preview
 
 | 变量 | 用途 |
 | --- | --- |
-| `QWEN_API_KEY` | `write/copilot/rewrite/agent fallback` 的模型调用密钥 |
+| `ARK_API_KEY` | `write/copilot/rewrite/agent fallback` 的火山方舟 Agent Plan 模型调用密钥 |
 
-### 常用可选（Qwen/Copilot）
+### 常用可选（火山方舟/Copilot）
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `QWEN_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Qwen 兼容接口地址 |
-| `QWEN_MODEL` | `qwen-plus` | 主执行模型 |
-| `QWEN_ROUTE_MODEL` | - | Copilot 路由模型备选 |
+| `ARK_BASE_URL` | `https://ark.cn-beijing.volces.com/api/plan/v3` | 火山方舟 Agent Plan OpenAI 兼容接口地址 |
+| `ARK_MODEL` | `glm-5.1` | 主执行模型 |
+| `ARK_ROUTE_MODEL` | `glm-5.1` | Copilot 路由模型备选 |
+| `ARK_THINKING_TYPE` | `disabled` | GLM5.1 thinking 模式；设为 `default` 可不传该字段 |
 | `QWEN_REQUEST_TIMEOUT_MS` | `180000` | `/api/write` 超时 |
 | `REWRITE_REQUEST_TIMEOUT_MS` | `120000` | `/api/rewrite` 超时 |
-| `COPILOT_ROUTE_MODEL` | `qwen-turbo` | Copilot 路由模型 |
+| `COPILOT_ROUTE_MODEL` | `glm-5.1` | Copilot 路由模型 |
 | `COPILOT_ROUTE_TIMEOUT_MS` | `20000` | Copilot 路由阶段超时 |
 | `COPILOT_EXECUTION_TIMEOUT_MS` | `120000` | Copilot 执行阶段超时 |
 | `COPILOT_EDIT_TIMEOUT_MS` | `180000` | Copilot 改写阶段超时 |
+
+> 兼容说明：服务端仍可读取旧的 `QWEN_API_KEY` 作为密钥别名，但模型地址与模型名默认使用火山方舟配置。
 
 ### 智能体工作流（AppForge）
 
@@ -215,7 +218,7 @@ SSE 事件：
 - `event: done`（最终正文）
 - `event: error`（错误）
 
-若真实工作流不可用，接口会自动降级为通用 Qwen 生成，并继续以 SSE 形式返回结果。
+若真实工作流不可用，接口会自动降级为火山方舟通用模型生成，并继续以 SSE 形式返回结果。
 
 ### `POST /api/rewrite`
 

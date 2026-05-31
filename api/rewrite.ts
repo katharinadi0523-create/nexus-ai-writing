@@ -1,6 +1,15 @@
+import {
+  getChatCompletionExtraBody,
+  getExecutionModelName,
+  getMissingApiKeyMessage,
+  getModelApiKey,
+  getModelBaseUrl,
+  getModelRequestErrorMessage,
+} from './model-config.js';
+
 type RewriteType = 'continue' | 'polish' | 'expand' | 'custom';
 
-interface QwenChatResponse {
+interface ChatCompletionResponse {
   choices?: Array<{
     message?: {
       content?: string | Array<{ text?: string; type?: string }>;
@@ -38,9 +47,7 @@ interface RewriteBody {
   customPrompt?: string;
 }
 
-const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
-const DEFAULT_MODEL = 'qwen-plus';
-const DEFAULT_QWEN_TIMEOUT_MS = 120000;
+const DEFAULT_MODEL_TIMEOUT_MS = 120000;
 
 function isHeadingLine(text: string): boolean {
   const line = text.trim();
@@ -62,7 +69,7 @@ function getRewriteInstruction(type: RewriteType, customPrompt?: string): string
   }
 }
 
-function extractContent(data: QwenChatResponse): string {
+function extractContent(data: ChatCompletionResponse): string {
   const content = data.choices?.[0]?.message?.content;
   if (typeof content === 'string') return content.trim();
   if (Array.isArray(content)) {
@@ -140,9 +147,9 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const apiKey = process.env.QWEN_API_KEY;
+  const apiKey = getModelApiKey();
   if (!apiKey) {
-    res.status(500).json({ error: '服务端未配置 QWEN_API_KEY' });
+    res.status(500).json({ error: getMissingApiKeyMessage() });
     return;
   }
 
@@ -169,11 +176,11 @@ export default async function handler(req: any, res: any) {
     },
   ];
 
-  const baseUrl = process.env.QWEN_BASE_URL || DEFAULT_BASE_URL;
-  const model = process.env.QWEN_MODEL || DEFAULT_MODEL;
+  const baseUrl = getModelBaseUrl();
+  const model = getExecutionModelName();
   const timeoutMs = parsePositiveInt(
     process.env.REWRITE_REQUEST_TIMEOUT_MS,
-    DEFAULT_QWEN_TIMEOUT_MS
+    DEFAULT_MODEL_TIMEOUT_MS
   );
 
   try {
@@ -191,6 +198,7 @@ export default async function handler(req: any, res: any) {
             model,
             messages,
             temperature: 0.7,
+            ...getChatCompletionExtraBody(),
           }),
         },
         timeoutMs
@@ -203,9 +211,9 @@ export default async function handler(req: any, res: any) {
       throw error;
     }
 
-    const data = (await response.json()) as QwenChatResponse;
+    const data = (await response.json()) as ChatCompletionResponse;
     if (!response.ok) {
-      const message = data.error?.message || `Qwen API 请求失败（${response.status}）`;
+      const message = data.error?.message || getModelRequestErrorMessage(response.status);
       res.status(response.status).json({ error: message });
       return;
     }
